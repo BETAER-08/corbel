@@ -1,0 +1,23 @@
+[package]
+name = "corbel-lang"
+description = "Language support plugins for corbel"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[features]
+default = ["lang-full"]
+lang-core = []
+lang-full = ["lang-core"]
+
+[dependencies]
+anyhow.workspace = true
+tree-sitter.workspace = true
+tracing.workspace = true
+corbel-core = { path = "../corbel-core" }
+
+[dev-dependencies]
+tempfile.workspace = true

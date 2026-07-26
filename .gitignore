@@ -1,0 +1,11 @@
+/target
+**/*.rs.bk
+*.pdb
+.idea/
+.vscode/
+.database/
+.corbel/
+.fastembed_cache/
+benchmarks/repos/
+benchmarks/results/
+.DS_Store

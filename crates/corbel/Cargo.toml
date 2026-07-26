@@ -1,0 +1,30 @@
+[package]
+name = "corbel"
+description = "MCP server that gives coding agents an accurate call graph of your codebase"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords = ["mcp", "code-context", "tree-sitter", "llm", "call-graph"]
+categories = ["development-tools", "command-line-utilities"]
+
+[[bin]]
+name = "corbel"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+corbel-core = { path = "../corbel-core" }
+corbel-lang = { path = "../corbel-lang" }
+
+[dev-dependencies]
+assert_cmd.workspace = true
+predicates.workspace = true
+tempfile.workspace = true

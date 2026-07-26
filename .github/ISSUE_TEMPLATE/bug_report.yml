@@ -1,0 +1,55 @@
+name: Bug report
+description: Report incorrect behavior in corbel
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: corbel version
+      description: Output of `corbel --version`.
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: Name and version of your operating system.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: language
+    attributes:
+      label: Target language
+      options:
+        - Rust
+        - Python
+        - TypeScript
+        - JavaScript
+        - TSX
+        - Other
+    validations:
+      required: false
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: corbel index and query output
+      render: text
+    validations:
+      required: false

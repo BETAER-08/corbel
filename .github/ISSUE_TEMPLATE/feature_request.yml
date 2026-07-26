@@ -1,0 +1,25 @@
+name: Feature request
+description: Propose new behavior for corbel
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: non-goals
+    attributes:
+      label: Non-goals
+      options:
+        - label: I have confirmed this request is not listed under Non-goals in the README.
+          required: true
