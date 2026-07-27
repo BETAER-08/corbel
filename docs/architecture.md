@@ -51,3 +51,17 @@ that yields a unique definition:
 4. `unresolved` — no unique definition was found.
 
 Every resolution records which stage produced it.
+
+## Schema migrations and content hashes
+
+`files.hash` is only a valid change-detection signal relative to the exact
+parsing and symbol-extraction logic that produced the rows keyed by it. If a
+future schema migration changes what gets stored for a file (new symbol
+fields, a different resolution scheme, a changed embedding format, etc.), the
+existing hashes no longer guarantee "nothing to do here" — indexing could skip
+files whose stored data is now stale relative to the new schema, even though
+the file's on-disk content hasn't changed. Any migration step that alters
+what `symbols`, `relationships`, `imports`, or `embeddings` capture for a file
+must therefore also clear the `files.hash` column (or truncate `files`
+outright) as part of that migration, forcing a full re-index on next run
+rather than trusting hashes computed under the old schema's assumptions.
