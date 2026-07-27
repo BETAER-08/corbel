@@ -20,6 +20,9 @@ pub enum Error {
 
     #[error("repository root {path} does not exist or is not a directory")]
     InvalidRepoRoot { path: PathBuf },
+
+    #[error("invalid content hash: {value}")]
+    InvalidContentHash { value: String },
 }
 
 impl Error {
