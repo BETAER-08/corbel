@@ -18,6 +18,7 @@ serde_json = "1.0.151"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 tree-sitter = "0.26.11"
+tree-sitter-rust = "0.24.2"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 xxhash-rust = { version = "0.8.18", features = ["xxh3"] }
 ignore = "0.4.31"
