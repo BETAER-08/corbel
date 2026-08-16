@@ -20,6 +20,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 tree-sitter = "0.26.11"
 tree-sitter-rust = "0.24.2"
 tree-sitter-python = "0.25.0"
+tree-sitter-typescript = "0.23.2"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 xxhash-rust = { version = "0.8.18", features = ["xxh3"] }
 ignore = "0.4.31"

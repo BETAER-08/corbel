@@ -1,1 +1,299 @@
+use tree_sitter::Node;
 
+use crate::support::{LanguageSupport, ScopeEntry, ScopeTable};
+
+const SYMBOL_QUERY: &str = r#"
+(function_declaration
+  name: (identifier) @name) @definition
+
+(class_declaration
+  name: (type_identifier) @name) @definition
+
+(method_definition
+  name: (property_identifier) @name) @definition
+
+(interface_declaration
+  name: (type_identifier) @name) @definition
+
+(type_alias_declaration
+  name: (type_identifier) @name) @definition
+
+(enum_declaration
+  name: (identifier) @name) @definition
+
+(variable_declarator
+  name: (identifier) @name
+  value: (arrow_function)) @definition
+"#;
+
+const REFERENCE_QUERY: &str = r#"
+(call_expression
+  function: (identifier) @callee)
+
+(call_expression
+  function: (member_expression
+    property: (property_identifier) @callee))
+
+(new_expression
+  constructor: (identifier) @callee)
+"#;
+
+fn module_text(source_node: Node, src: &str) -> Option<String> {
+    source_node
+        .named_child(0)
+        .and_then(|fragment| fragment.utf8_text(src.as_bytes()).ok())
+        .map(str::to_string)
+}
+
+fn alias_or_name(specifier: Node, src: &str) -> Option<(String, String)> {
+    let name_node = specifier.child_by_field_name("name")?;
+    let name_text = name_node.utf8_text(src.as_bytes()).ok()?.to_string();
+    let local_name = match specifier.child_by_field_name("alias") {
+        Some(alias_node) => alias_node.utf8_text(src.as_bytes()).ok()?.to_string(),
+        None => name_text.clone(),
+    };
+    Some((local_name, name_text))
+}
+
+fn collect_import_statement(node: Node, src: &str, entries: &mut Vec<ScopeEntry>) {
+    let Some(source_node) = node.child_by_field_name("source") else {
+        return;
+    };
+    let Some(module) = module_text(source_node, src) else {
+        return;
+    };
+
+    let clause = node
+        .named_child(0)
+        .filter(|child| child.kind() == "import_clause");
+
+    let Some(clause) = clause else {
+        entries.push(ScopeEntry {
+            local_name: String::new(),
+            source_path: module,
+            kind: "import-effect".to_string(),
+        });
+        return;
+    };
+
+    let Some(binding) = clause.named_child(0) else {
+        return;
+    };
+
+    match binding.kind() {
+        "identifier" => {
+            if let Ok(local_name) = binding.utf8_text(src.as_bytes()) {
+                entries.push(ScopeEntry {
+                    local_name: local_name.to_string(),
+                    source_path: module,
+                    kind: "import-default".to_string(),
+                });
+            }
+        }
+        "namespace_import" => {
+            if let Some(identifier) = binding.named_child(0)
+                && let Ok(local_name) = identifier.utf8_text(src.as_bytes())
+            {
+                entries.push(ScopeEntry {
+                    local_name: local_name.to_string(),
+                    source_path: module,
+                    kind: "import-namespace".to_string(),
+                });
+            }
+        }
+        "named_imports" => {
+            let mut cursor = binding.walk();
+            for specifier in binding.named_children(&mut cursor) {
+                if specifier.kind() != "import_specifier" {
+                    continue;
+                }
+                if let Some((local_name, name_text)) = alias_or_name(specifier, src) {
+                    entries.push(ScopeEntry {
+                        local_name,
+                        source_path: format!("{module}.{name_text}"),
+                        kind: "import".to_string(),
+                    });
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_export_statement(node: Node, src: &str, entries: &mut Vec<ScopeEntry>) {
+    let Some(source_node) = node.child_by_field_name("source") else {
+        return;
+    };
+    let Some(module) = module_text(source_node, src) else {
+        return;
+    };
+
+    let clause = node
+        .named_child(0)
+        .filter(|child| child.kind() == "export_clause");
+
+    let Some(clause) = clause else {
+        entries.push(ScopeEntry {
+            local_name: "*".to_string(),
+            source_path: module,
+            kind: "re-export-all".to_string(),
+        });
+        return;
+    };
+
+    let mut cursor = clause.walk();
+    for specifier in clause.named_children(&mut cursor) {
+        if specifier.kind() != "export_specifier" {
+            continue;
+        }
+        if let Some((local_name, name_text)) = alias_or_name(specifier, src) {
+            entries.push(ScopeEntry {
+                local_name,
+                source_path: format!("{module}.{name_text}"),
+                kind: "re-export".to_string(),
+            });
+        }
+    }
+}
+
+fn walk_imports(node: Node, src: &str, entries: &mut Vec<ScopeEntry>) {
+    match node.kind() {
+        "import_statement" => collect_import_statement(node, src, entries),
+        "export_statement" => collect_export_statement(node, src, entries),
+        _ => {}
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk_imports(child, src, entries);
+    }
+}
+
+pub struct TypeScriptSupport;
+
+impl LanguageSupport for TypeScriptSupport {
+    fn extensions(&self) -> &'static [&'static str] {
+        &["ts"]
+    }
+
+    fn grammar(&self) -> tree_sitter::Language {
+        tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()
+    }
+
+    fn symbol_query(&self) -> &'static str {
+        SYMBOL_QUERY
+    }
+
+    fn reference_query(&self) -> &'static str {
+        REFERENCE_QUERY
+    }
+
+    fn symbol_kind(&self, node_kind: &str) -> String {
+        match node_kind {
+            "function_declaration" => "function",
+            "variable_declarator" => "function",
+            "method_definition" => "method",
+            "class_declaration" => "class",
+            "interface_declaration" => "interface",
+            "type_alias_declaration" => "type",
+            "enum_declaration" => "enum",
+            other => unreachable!("symbol_query captured unexpected node kind: {other}"),
+        }
+        .to_string()
+    }
+
+    fn extract_signature(&self, node: tree_sitter::Node, src: &str) -> Option<String> {
+        let (start_byte, end_byte) = match node.kind() {
+            "interface_declaration" | "type_alias_declaration" => {
+                (node.start_byte(), node.end_byte())
+            }
+            "variable_declarator" => {
+                let start_byte = node
+                    .parent()
+                    .map(|parent| parent.start_byte())
+                    .unwrap_or_else(|| node.start_byte());
+                let end_byte = node
+                    .child_by_field_name("value")
+                    .and_then(|value| value.child_by_field_name("body"))
+                    .map(|body| body.start_byte())
+                    .unwrap_or_else(|| node.end_byte());
+                (start_byte, end_byte)
+            }
+            _ => {
+                let end_byte = node
+                    .child_by_field_name("body")
+                    .map(|body| body.start_byte())
+                    .unwrap_or_else(|| node.end_byte());
+                (node.start_byte(), end_byte)
+            }
+        };
+
+        if end_byte <= start_byte {
+            return None;
+        }
+
+        let raw = &src[start_byte..end_byte];
+        let normalized = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+        if normalized.is_empty() {
+            None
+        } else {
+            Some(normalized)
+        }
+    }
+
+    fn is_public(&self, node: tree_sitter::Node, src: &str) -> bool {
+        match node.kind() {
+            "method_definition" => {
+                let mut cursor = node.walk();
+                let modifier = node
+                    .children(&mut cursor)
+                    .find(|child| child.kind() == "accessibility_modifier");
+                match modifier {
+                    Some(modifier) => modifier
+                        .utf8_text(src.as_bytes())
+                        .map(|text| text == "public")
+                        .unwrap_or(true),
+                    None => true,
+                }
+            }
+            "variable_declarator" => node
+                .parent()
+                .and_then(|parent| parent.parent())
+                .map(|grandparent| grandparent.kind() == "export_statement")
+                .unwrap_or(false),
+            _ => node
+                .parent()
+                .map(|parent| parent.kind() == "export_statement")
+                .unwrap_or(false),
+        }
+    }
+
+    fn enclosing_definition_name(&self, node: tree_sitter::Node, src: &str) -> Option<String> {
+        let mut current = node.parent();
+        while let Some(ancestor) = current {
+            match ancestor.kind() {
+                "function_declaration" | "method_definition" => {
+                    let name_node = ancestor.child_by_field_name("name")?;
+                    return name_node.utf8_text(src.as_bytes()).ok().map(str::to_string);
+                }
+                "variable_declarator"
+                    if ancestor
+                        .child_by_field_name("value")
+                        .is_some_and(|value| value.kind() == "arrow_function") =>
+                {
+                    let name_node = ancestor.child_by_field_name("name")?;
+                    return name_node.utf8_text(src.as_bytes()).ok().map(str::to_string);
+                }
+                _ => {}
+            }
+            current = ancestor.parent();
+        }
+        None
+    }
+
+    fn build_scope(&self, tree: &tree_sitter::Tree, src: &str) -> ScopeTable {
+        let mut entries = Vec::new();
+        walk_imports(tree.root_node(), src, &mut entries);
+        ScopeTable { entries }
+    }
+}
