@@ -205,6 +205,18 @@ impl LanguageSupport for RustSupport {
             .any(|child| child.kind() == "visibility_modifier")
     }
 
+    fn enclosing_definition_name(&self, node: tree_sitter::Node, src: &str) -> Option<String> {
+        let mut current = node.parent();
+        while let Some(ancestor) = current {
+            if ancestor.kind() == "function_item" {
+                let name_node = ancestor.child_by_field_name("name")?;
+                return name_node.utf8_text(src.as_bytes()).ok().map(str::to_string);
+            }
+            current = ancestor.parent();
+        }
+        None
+    }
+
     fn build_scope(&self, tree: &tree_sitter::Tree, src: &str) -> ScopeTable {
         let query =
             tree_sitter::Query::new(&self.grammar(), USE_DECLARATION_QUERY).expect("valid query");

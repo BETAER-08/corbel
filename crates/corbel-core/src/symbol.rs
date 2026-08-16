@@ -13,6 +13,7 @@ pub struct Symbol {
 pub struct Reference {
     pub callee_name: String,
     pub line: u32,
+    pub caller_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

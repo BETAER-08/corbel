@@ -92,6 +92,7 @@ impl FileParser for LanguageRegistry {
             .map(|raw| Reference {
                 callee_name: raw.callee_name,
                 line: raw.line,
+                caller_name: raw.caller_name,
             })
             .collect();
 

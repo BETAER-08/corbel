@@ -11,6 +11,7 @@ pub struct RawSymbol {
 pub struct RawReference {
     pub callee_name: String,
     pub line: u32,
+    pub caller_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +42,8 @@ pub trait LanguageSupport {
     fn is_public(&self, node: tree_sitter::Node, src: &str) -> bool;
 
     fn build_scope(&self, tree: &tree_sitter::Tree, src: &str) -> ScopeTable;
+
+    fn enclosing_definition_name(&self, node: tree_sitter::Node, src: &str) -> Option<String>;
 
     fn extract_symbols(&self, src: &str) -> Vec<RawSymbol> {
         use tree_sitter::StreamingIterator;
@@ -126,6 +129,7 @@ pub trait LanguageSupport {
             references.push(RawReference {
                 callee_name,
                 line: callee.start_position().row as u32 + 1,
+                caller_name: self.enclosing_definition_name(callee, src),
             });
         }
 
