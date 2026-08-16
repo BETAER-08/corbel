@@ -12,22 +12,51 @@ pub fn open_connection(db_path: impl AsRef<Path>) -> Result<Connection> {
 }
 
 pub fn migrate(conn: &Connection) -> Result<()> {
-    let user_version: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    loop {
+        let user_version: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
 
-    match user_version {
-        0 => migrate_v0_to_v1(conn),
-        v if v == CURRENT_SCHEMA_VERSION => Ok(()),
-        v if v > CURRENT_SCHEMA_VERSION => Err(Error::Migration {
-            expected: CURRENT_SCHEMA_VERSION as i64,
-            found: v as i64,
-        }),
-        v => Err(Error::Migration {
-            expected: CURRENT_SCHEMA_VERSION as i64,
-            found: v as i64,
-        }),
+        match user_version {
+            v if v == CURRENT_SCHEMA_VERSION => return Ok(()),
+            v if v > CURRENT_SCHEMA_VERSION => {
+                return Err(Error::Migration {
+                    expected: CURRENT_SCHEMA_VERSION as i64,
+                    found: v as i64,
+                });
+            }
+            0 => migrate_v0_to_v1(conn)?,
+            1 => migrate_v1_to_v2(conn)?,
+            v => {
+                return Err(Error::Migration {
+                    expected: CURRENT_SCHEMA_VERSION as i64,
+                    found: v as i64,
+                });
+            }
+        }
     }
 }
 
 fn migrate_v0_to_v1(conn: &Connection) -> Result<()> {
     create_schema(conn)
+}
+
+fn migrate_v1_to_v2(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "
+        DROP TABLE relationships;
+
+        CREATE TABLE relationships (
+            id INTEGER PRIMARY KEY,
+            caller_symbol_id INTEGER NOT NULL REFERENCES symbols(id) ON DELETE CASCADE,
+            callee_name TEXT NOT NULL,
+            callee_file_id INTEGER REFERENCES files(id) ON DELETE SET NULL,
+            resolution TEXT NOT NULL CHECK (resolution IN ('same-file', 'scoped', 'global-unique', 'external', 'unresolved'))
+        );
+
+        CREATE INDEX idx_relationships_callee_file ON relationships(callee_file_id);
+
+        UPDATE files SET hash = '';
+        ",
+    )?;
+    conn.pragma_update(None, "user_version", 2)?;
+    Ok(())
 }

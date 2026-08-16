@@ -7,8 +7,6 @@ use corbel_core::path::RepoRoot;
 use corbel_core::store::migrate::open_connection;
 use corbel_lang::registry::LanguageRegistry;
 
-const UNRESOLVED_WARNING_THRESHOLD: f64 = 50.0;
-
 pub fn run(path: &Path, verbose: bool) -> anyhow::Result<()> {
     let root = RepoRoot::new(path)
         .with_context(|| format!("failed to open repository root at {}", path.display()))?;
@@ -53,28 +51,34 @@ fn print_summary(stats: &IndexStats, total_symbols: i64, total_relationships: i6
         stats.files_indexed, stats.files_skipped_unchanged
     );
     println!("{total_symbols} symbols, {total_relationships} references");
+    println!();
 
     let resolution = &stats.resolution;
-    let total =
-        resolution.same_file + resolution.scoped + resolution.global_unique + resolution.unresolved;
+    let internal_resolved = resolution.same_file + resolution.scoped + resolution.global_unique;
+    let internal_total = internal_resolved + resolution.unresolved;
 
-    println!(
-        "Resolution: {} same-file, {} scoped, {} global-unique, {} unresolved",
-        resolution.same_file, resolution.scoped, resolution.global_unique, resolution.unresolved
-    );
-
-    if total == 0 {
-        println!("Unresolved: 0/0 (n/a)");
-        return;
+    if internal_total == 0 {
+        println!("Internal calls: 0 resolved / 0 total (n/a)");
+    } else {
+        let pct = internal_resolved as f64 / internal_total as f64 * 100.0;
+        println!(
+            "Internal calls: {internal_resolved} resolved / {internal_total} total ({pct:.1}%)"
+        );
     }
-
-    let pct = resolution.unresolved as f64 / total as f64 * 100.0;
     println!(
-        "Unresolved: {}/{} ({pct:.1}%)",
-        resolution.unresolved, total
+        "  same-file: {}, scoped: {}, global-unique: {}",
+        resolution.same_file, resolution.scoped, resolution.global_unique
+    );
+    println!("  unresolved (ambiguous): {}", resolution.unresolved);
+    println!(
+        "External calls: {} (std, crates, dynamic dispatch)",
+        resolution.external
     );
 
-    if pct > UNRESOLVED_WARNING_THRESHOLD {
-        println!("Warning: over half of the detected call relationships remain unresolved.");
+    if resolution.unresolved > 0 {
+        println!(
+            "Note: {} internal call(s) could not be resolved because multiple definitions share the same name.",
+            resolution.unresolved
+        );
     }
 }

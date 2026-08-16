@@ -9,6 +9,7 @@ pub struct ResolutionStats {
     pub same_file: usize,
     pub scoped: usize,
     pub global_unique: usize,
+    pub external: usize,
     pub unresolved: usize,
 }
 
@@ -106,6 +107,7 @@ pub fn resolve_all(conn: &Connection) -> Result<ResolutionStats> {
             match (unique_file, has_scoped_import) {
                 (Some(file_id), true) => ("scoped", Some(file_id)),
                 (Some(file_id), false) => ("global-unique", Some(file_id)),
+                (None, _) if candidates.is_empty() => ("external", None),
                 (None, _) => ("unresolved", None),
             }
         };
@@ -119,6 +121,7 @@ pub fn resolve_all(conn: &Connection) -> Result<ResolutionStats> {
             "same-file" => stats.same_file += 1,
             "scoped" => stats.scoped += 1,
             "global-unique" => stats.global_unique += 1,
+            "external" => stats.external += 1,
             _ => stats.unresolved += 1,
         }
     }

@@ -1,7 +1,7 @@
 use crate::error::Result;
 use rusqlite::Connection;
 
-pub const CURRENT_SCHEMA_VERSION: i32 = 1;
+pub const CURRENT_SCHEMA_VERSION: i32 = 2;
 
 const SCHEMA_DDL: &str = "
 CREATE TABLE files (
@@ -27,7 +27,7 @@ CREATE TABLE relationships (
     caller_symbol_id INTEGER NOT NULL REFERENCES symbols(id) ON DELETE CASCADE,
     callee_name TEXT NOT NULL,
     callee_file_id INTEGER REFERENCES files(id) ON DELETE SET NULL,
-    resolution TEXT NOT NULL CHECK (resolution IN ('same-file', 'scoped', 'global-unique', 'unresolved'))
+    resolution TEXT NOT NULL CHECK (resolution IN ('same-file', 'scoped', 'global-unique', 'external', 'unresolved'))
 );
 
 CREATE TABLE imports (
