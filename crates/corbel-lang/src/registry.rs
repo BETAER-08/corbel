@@ -29,6 +29,9 @@ impl LanguageRegistry {
             .register(Box::new(crate::langs::rust::RustSupport))
             .expect("built-in languages register without extension conflicts");
         registry
+            .register(Box::new(crate::langs::python::PythonSupport))
+            .expect("built-in languages register without extension conflicts");
+        registry
     }
 
     pub fn register(&mut self, support: Box<dyn LanguageSupport>) -> Result<(), RegistryError> {
