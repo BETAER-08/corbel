@@ -2,6 +2,7 @@ pub mod budget;
 pub mod embed;
 pub mod error;
 pub mod hash;
+pub mod index;
 pub mod path;
 pub mod query;
 pub mod resolve;

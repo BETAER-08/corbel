@@ -195,6 +195,7 @@ name = "corbel-core"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "corbel-lang",
  "ignore",
  "rayon",
  "rusqlite",

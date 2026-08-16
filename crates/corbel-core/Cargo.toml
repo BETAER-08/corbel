@@ -21,3 +21,4 @@ tracing.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+corbel-lang = { path = "../corbel-lang" }

@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use corbel_core::path::RelPath;
+use corbel_core::symbol::{FileParser, Import, ParsedFile, Reference, Symbol};
+
 use crate::support::LanguageSupport;
 
 #[derive(Debug, thiserror::Error)]
@@ -53,5 +56,72 @@ impl LanguageRegistry {
 
     pub fn supported_extensions(&self) -> Vec<&str> {
         self.by_extension.keys().map(String::as_str).collect()
+    }
+}
+
+impl FileParser for LanguageRegistry {
+    fn parse(&self, path: &RelPath, source: &str) -> ParsedFile {
+        let extension = match Path::new(path.as_ref())
+            .extension()
+            .and_then(|e| e.to_str())
+        {
+            Some(extension) => extension,
+            None => return ParsedFile::default(),
+        };
+
+        let support = match self.for_extension(extension) {
+            Some(support) => support,
+            None => return ParsedFile::default(),
+        };
+
+        let symbols = support
+            .extract_symbols(source)
+            .into_iter()
+            .map(|raw| Symbol {
+                name: raw.name,
+                kind: raw.kind,
+                line: raw.line,
+                signature: raw.signature,
+                is_public: raw.is_public,
+            })
+            .collect();
+
+        let references = support
+            .extract_references(source)
+            .into_iter()
+            .map(|raw| Reference {
+                callee_name: raw.callee_name,
+                line: raw.line,
+            })
+            .collect();
+
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&support.grammar())
+            .expect("grammar loads");
+        let tree = parser.parse(source, None).expect("source parses");
+        let imports = support
+            .build_scope(&tree, source)
+            .entries
+            .into_iter()
+            .map(|entry| Import {
+                local_name: entry.local_name,
+                source_path: entry.source_path,
+                kind: entry.kind,
+            })
+            .collect();
+
+        ParsedFile {
+            symbols,
+            references,
+            imports,
+        }
+    }
+
+    fn extensions(&self) -> Vec<String> {
+        self.supported_extensions()
+            .into_iter()
+            .map(str::to_string)
+            .collect()
     }
 }
