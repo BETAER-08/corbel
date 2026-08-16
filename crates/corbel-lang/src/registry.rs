@@ -23,6 +23,14 @@ impl LanguageRegistry {
         Self::default()
     }
 
+    pub fn with_all_languages() -> Self {
+        let mut registry = Self::new();
+        registry
+            .register(Box::new(crate::langs::rust::RustSupport))
+            .expect("built-in languages register without extension conflicts");
+        registry
+    }
+
     pub fn register(&mut self, support: Box<dyn LanguageSupport>) -> Result<(), RegistryError> {
         for extension in support.extensions() {
             let normalized = extension.to_ascii_lowercase();

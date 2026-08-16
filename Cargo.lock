@@ -183,6 +183,7 @@ dependencies = [
  "corbel-core",
  "corbel-lang",
  "predicates",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
