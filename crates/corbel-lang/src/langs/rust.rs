@@ -1,6 +1,6 @@
 use tree_sitter::{Node, StreamingIterator};
 
-use crate::support::{LanguageSupport, ScopeEntry, ScopeTable};
+use crate::support::{ImportKind, LanguageSupport, ScopeEntry, ScopeTable};
 
 const SYMBOL_QUERY: &str = r#"
 (function_item
@@ -55,10 +55,18 @@ fn join_path(prefix: Option<&str>, rel: &str) -> String {
     }
 }
 
+fn direct_kind(is_reexport: bool, aliased: bool) -> ImportKind {
+    if is_reexport {
+        ImportKind::Reexport { aliased }
+    } else {
+        ImportKind::Direct { aliased }
+    }
+}
+
 fn collect_use_tree(
     node: Node,
     prefix: Option<&str>,
-    kind: &str,
+    is_reexport: bool,
     src: &str,
     entries: &mut Vec<ScopeEntry>,
 ) {
@@ -67,18 +75,18 @@ fn collect_use_tree(
             if let Ok(name) = node.utf8_text(src.as_bytes()) {
                 let source_path = join_path(prefix, name);
                 entries.push(ScopeEntry {
-                    local_name: name.to_string(),
+                    local_name: Some(name.to_string()),
                     source_path,
-                    kind: kind.to_string(),
+                    kind: direct_kind(is_reexport, false),
                 });
             }
         }
         "self" => {
             if let Some(prefix) = prefix {
                 entries.push(ScopeEntry {
-                    local_name: last_segment(prefix),
+                    local_name: Some(last_segment(prefix)),
                     source_path: prefix.to_string(),
-                    kind: kind.to_string(),
+                    kind: direct_kind(is_reexport, false),
                 });
             }
         }
@@ -86,9 +94,9 @@ fn collect_use_tree(
             if let Some(rel) = path_text(node, src) {
                 let source_path = join_path(prefix, &rel);
                 entries.push(ScopeEntry {
-                    local_name: last_segment(&rel),
+                    local_name: Some(last_segment(&rel)),
                     source_path,
-                    kind: kind.to_string(),
+                    kind: direct_kind(is_reexport, false),
                 });
             }
         }
@@ -102,9 +110,9 @@ fn collect_use_tree(
                 ) {
                     let source_path = join_path(prefix, &rel);
                     entries.push(ScopeEntry {
-                        local_name: alias.to_string(),
+                        local_name: Some(alias.to_string()),
                         source_path,
-                        kind: kind.to_string(),
+                        kind: direct_kind(is_reexport, true),
                     });
                 }
             }
@@ -120,14 +128,20 @@ fn collect_use_tree(
             if let Some(list) = node.child_by_field_name("list") {
                 let mut cursor = list.walk();
                 for item in list.named_children(&mut cursor) {
-                    collect_use_tree(item, Some(combined_prefix.as_str()), kind, src, entries);
+                    collect_use_tree(
+                        item,
+                        Some(combined_prefix.as_str()),
+                        is_reexport,
+                        src,
+                        entries,
+                    );
                 }
             }
         }
         "use_list" => {
             let mut cursor = node.walk();
             for item in node.named_children(&mut cursor) {
-                collect_use_tree(item, prefix, kind, src, entries);
+                collect_use_tree(item, prefix, is_reexport, src, entries);
             }
         }
         "use_wildcard" => {
@@ -141,9 +155,9 @@ fn collect_use_tree(
                 None => prefix.unwrap_or("").to_string(),
             };
             entries.push(ScopeEntry {
-                local_name: "*".to_string(),
+                local_name: None,
                 source_path,
-                kind: "glob".to_string(),
+                kind: ImportKind::Wildcard,
             });
         }
         _ => {}
@@ -227,13 +241,9 @@ impl LanguageSupport for RustSupport {
         while let Some(m) = matches.next() {
             for capture in m.captures {
                 let declaration = capture.node;
-                let decl_kind = if self.is_public(declaration, src) {
-                    "pub-use"
-                } else {
-                    "use"
-                };
+                let is_reexport = self.is_public(declaration, src);
                 if let Some(argument) = declaration.child_by_field_name("argument") {
-                    collect_use_tree(argument, None, decl_kind, src, &mut entries);
+                    collect_use_tree(argument, None, is_reexport, src, &mut entries);
                 }
             }
         }

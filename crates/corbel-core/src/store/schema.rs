@@ -1,7 +1,7 @@
 use crate::error::Result;
 use rusqlite::Connection;
 
-pub const CURRENT_SCHEMA_VERSION: i32 = 2;
+pub const CURRENT_SCHEMA_VERSION: i32 = 3;
 
 const SCHEMA_DDL: &str = "
 CREATE TABLE files (
@@ -33,7 +33,7 @@ CREATE TABLE relationships (
 CREATE TABLE imports (
     id INTEGER PRIMARY KEY,
     file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
-    local_name TEXT NOT NULL,
+    local_name TEXT,
     source_path TEXT NOT NULL,
     kind TEXT NOT NULL
 );

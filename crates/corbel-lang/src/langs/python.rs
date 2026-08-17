@@ -1,4 +1,4 @@
-use crate::support::{LanguageSupport, ScopeEntry, ScopeTable};
+use crate::support::{ImportKind, LanguageSupport, ScopeEntry, ScopeTable};
 
 const SYMBOL_QUERY: &str = r#"
 (function_definition
@@ -36,9 +36,9 @@ fn collect_import_statement(node: tree_sitter::Node, src: &str, entries: &mut Ve
                 ) && let Ok(local) = first.utf8_text(src.as_bytes())
                 {
                     entries.push(ScopeEntry {
-                        local_name: local.to_string(),
+                        local_name: Some(local.to_string()),
                         source_path: full.to_string(),
-                        kind: "import".to_string(),
+                        kind: ImportKind::Direct { aliased: false },
                     });
                 }
             }
@@ -51,9 +51,9 @@ fn collect_import_statement(node: tree_sitter::Node, src: &str, entries: &mut Ve
                     alias_node.utf8_text(src.as_bytes()),
                 ) {
                     entries.push(ScopeEntry {
-                        local_name: local_name.to_string(),
+                        local_name: Some(local_name.to_string()),
                         source_path: source_path.to_string(),
-                        kind: "import".to_string(),
+                        kind: ImportKind::Direct { aliased: true },
                     });
                 }
             }
@@ -78,9 +78,9 @@ fn collect_import_from_statement(
     for child in node.children(&mut wildcard_cursor) {
         if child.kind() == "wildcard_import" {
             entries.push(ScopeEntry {
-                local_name: "*".to_string(),
+                local_name: None,
                 source_path: module_text.to_string(),
-                kind: "glob".to_string(),
+                kind: ImportKind::Wildcard,
             });
         }
     }
@@ -91,9 +91,9 @@ fn collect_import_from_statement(
             "dotted_name" => {
                 if let Ok(name_text) = name_node.utf8_text(src.as_bytes()) {
                     entries.push(ScopeEntry {
-                        local_name: name_text.to_string(),
+                        local_name: Some(name_text.to_string()),
                         source_path: join_from_source(module_text, name_text),
-                        kind: "from-import".to_string(),
+                        kind: ImportKind::Direct { aliased: false },
                     });
                 }
             }
@@ -106,9 +106,9 @@ fn collect_import_from_statement(
                     alias_field.utf8_text(src.as_bytes()),
                 ) {
                     entries.push(ScopeEntry {
-                        local_name: alias_text.to_string(),
+                        local_name: Some(alias_text.to_string()),
                         source_path: join_from_source(module_text, name_text),
-                        kind: "from-import".to_string(),
+                        kind: ImportKind::Direct { aliased: true },
                     });
                 }
             }

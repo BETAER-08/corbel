@@ -25,6 +25,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             }
             0 => migrate_v0_to_v1(conn)?,
             1 => migrate_v1_to_v2(conn)?,
+            2 => migrate_v2_to_v3(conn)?,
             v => {
                 return Err(Error::Migration {
                     expected: CURRENT_SCHEMA_VERSION as i64,
@@ -58,5 +59,27 @@ fn migrate_v1_to_v2(conn: &Connection) -> Result<()> {
         ",
     )?;
     conn.pragma_update(None, "user_version", 2)?;
+    Ok(())
+}
+
+fn migrate_v2_to_v3(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "
+        DROP TABLE imports;
+
+        CREATE TABLE imports (
+            id INTEGER PRIMARY KEY,
+            file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+            local_name TEXT,
+            source_path TEXT NOT NULL,
+            kind TEXT NOT NULL
+        );
+
+        CREATE INDEX idx_imports_file ON imports(file_id);
+
+        UPDATE files SET hash = '';
+        ",
+    )?;
+    conn.pragma_update(None, "user_version", 3)?;
     Ok(())
 }

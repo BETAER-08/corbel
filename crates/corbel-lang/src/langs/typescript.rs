@@ -1,6 +1,6 @@
 use tree_sitter::Node;
 
-use crate::support::{LanguageSupport, ScopeEntry, ScopeTable};
+use crate::support::{ImportKind, LanguageSupport, ScopeEntry, ScopeTable};
 
 const SYMBOL_QUERY: &str = r#"
 (function_declaration
@@ -45,14 +45,14 @@ fn module_text(source_node: Node, src: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn alias_or_name(specifier: Node, src: &str) -> Option<(String, String)> {
+fn alias_or_name(specifier: Node, src: &str) -> Option<(String, String, bool)> {
     let name_node = specifier.child_by_field_name("name")?;
     let name_text = name_node.utf8_text(src.as_bytes()).ok()?.to_string();
-    let local_name = match specifier.child_by_field_name("alias") {
-        Some(alias_node) => alias_node.utf8_text(src.as_bytes()).ok()?.to_string(),
-        None => name_text.clone(),
+    let (local_name, aliased) = match specifier.child_by_field_name("alias") {
+        Some(alias_node) => (alias_node.utf8_text(src.as_bytes()).ok()?.to_string(), true),
+        None => (name_text.clone(), false),
     };
-    Some((local_name, name_text))
+    Some((local_name, name_text, aliased))
 }
 
 fn collect_import_statement(node: Node, src: &str, entries: &mut Vec<ScopeEntry>) {
@@ -69,9 +69,9 @@ fn collect_import_statement(node: Node, src: &str, entries: &mut Vec<ScopeEntry>
 
     let Some(clause) = clause else {
         entries.push(ScopeEntry {
-            local_name: String::new(),
+            local_name: None,
             source_path: module,
-            kind: "import-effect".to_string(),
+            kind: ImportKind::SideEffect,
         });
         return;
     };
@@ -84,9 +84,9 @@ fn collect_import_statement(node: Node, src: &str, entries: &mut Vec<ScopeEntry>
         "identifier" => {
             if let Ok(local_name) = binding.utf8_text(src.as_bytes()) {
                 entries.push(ScopeEntry {
-                    local_name: local_name.to_string(),
+                    local_name: Some(local_name.to_string()),
                     source_path: module,
-                    kind: "import-default".to_string(),
+                    kind: ImportKind::Direct { aliased: false },
                 });
             }
         }
@@ -95,9 +95,9 @@ fn collect_import_statement(node: Node, src: &str, entries: &mut Vec<ScopeEntry>
                 && let Ok(local_name) = identifier.utf8_text(src.as_bytes())
             {
                 entries.push(ScopeEntry {
-                    local_name: local_name.to_string(),
+                    local_name: Some(local_name.to_string()),
                     source_path: module,
-                    kind: "import-namespace".to_string(),
+                    kind: ImportKind::Namespace,
                 });
             }
         }
@@ -107,11 +107,11 @@ fn collect_import_statement(node: Node, src: &str, entries: &mut Vec<ScopeEntry>
                 if specifier.kind() != "import_specifier" {
                     continue;
                 }
-                if let Some((local_name, name_text)) = alias_or_name(specifier, src) {
+                if let Some((local_name, name_text, aliased)) = alias_or_name(specifier, src) {
                     entries.push(ScopeEntry {
-                        local_name,
+                        local_name: Some(local_name),
                         source_path: format!("{module}.{name_text}"),
-                        kind: "import".to_string(),
+                        kind: ImportKind::Direct { aliased },
                     });
                 }
             }
@@ -134,9 +134,9 @@ fn collect_export_statement(node: Node, src: &str, entries: &mut Vec<ScopeEntry>
 
     let Some(clause) = clause else {
         entries.push(ScopeEntry {
-            local_name: "*".to_string(),
+            local_name: None,
             source_path: module,
-            kind: "re-export-all".to_string(),
+            kind: ImportKind::Wildcard,
         });
         return;
     };
@@ -146,11 +146,11 @@ fn collect_export_statement(node: Node, src: &str, entries: &mut Vec<ScopeEntry>
         if specifier.kind() != "export_specifier" {
             continue;
         }
-        if let Some((local_name, name_text)) = alias_or_name(specifier, src) {
+        if let Some((local_name, name_text, aliased)) = alias_or_name(specifier, src) {
             entries.push(ScopeEntry {
-                local_name,
+                local_name: Some(local_name),
                 source_path: format!("{module}.{name_text}"),
-                kind: "re-export".to_string(),
+                kind: ImportKind::Reexport { aliased },
             });
         }
     }

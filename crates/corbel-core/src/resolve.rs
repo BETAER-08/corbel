@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use rusqlite::{Connection, params};
 
 use crate::error::Result;
+use crate::symbol::ImportKind;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ResolutionStats {
@@ -14,9 +15,9 @@ pub struct ResolutionStats {
 }
 
 struct ImportEntry {
-    local_name: String,
+    local_name: Option<String>,
     source_path: String,
-    kind: String,
+    kind: ImportKind,
 }
 
 fn last_segment(path: &str) -> &str {
@@ -48,13 +49,17 @@ pub fn resolve_all(conn: &Connection) -> Result<ResolutionStats> {
         let mut rows = stmt.query([])?;
         while let Some(row) = rows.next()? {
             let file_id: i64 = row.get(0)?;
+            let kind_str: String = row.get(3)?;
+            let kind = kind_str
+                .parse::<ImportKind>()
+                .expect("imports.kind holds a value written by ImportKind::as_str");
             imports_by_file
                 .entry(file_id)
                 .or_default()
                 .push(ImportEntry {
                     local_name: row.get(1)?,
                     source_path: row.get(2)?,
-                    kind: row.get(3)?,
+                    kind,
                 });
         }
     }
@@ -98,8 +103,14 @@ pub fn resolve_all(conn: &Connection) -> Result<ResolutionStats> {
 
             let has_scoped_import = imports_by_file.get(&caller_file_id).is_some_and(|entries| {
                 entries.iter().any(|entry| {
-                    entry.kind != "glob"
-                        && (entry.local_name == callee_name
+                    let is_scoped_candidate = match entry.kind {
+                        ImportKind::Direct { .. }
+                        | ImportKind::Reexport { .. }
+                        | ImportKind::Namespace => true,
+                        ImportKind::Wildcard | ImportKind::SideEffect => false,
+                    };
+                    is_scoped_candidate
+                        && (entry.local_name.as_deref() == Some(callee_name.as_str())
                             || last_segment(&entry.source_path) == callee_name)
                 })
             });

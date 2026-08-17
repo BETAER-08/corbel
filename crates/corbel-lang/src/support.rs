@@ -14,11 +14,13 @@ pub struct RawReference {
     pub caller_name: Option<String>,
 }
 
+pub use corbel_core::symbol::ImportKind;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScopeEntry {
-    pub local_name: String,
+    pub local_name: Option<String>,
     pub source_path: String,
-    pub kind: String,
+    pub kind: ImportKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
