@@ -2,7 +2,7 @@ use tree_sitter::Node;
 
 use crate::support::{ImportKind, LanguageSupport, ScopeEntry, ScopeTable};
 
-const SYMBOL_QUERY: &str = r#"
+pub(crate) const SYMBOL_QUERY: &str = r#"
 (function_declaration
   name: (identifier) @name) @definition
 
@@ -169,6 +169,113 @@ fn walk_imports(node: Node, src: &str, entries: &mut Vec<ScopeEntry>) {
     }
 }
 
+pub(crate) fn symbol_kind(node_kind: &str) -> String {
+    match node_kind {
+        "function_declaration" => "function",
+        "variable_declarator" => "function",
+        "method_definition" => "method",
+        "class_declaration" => "class",
+        "interface_declaration" => "interface",
+        "type_alias_declaration" => "type",
+        "enum_declaration" => "enum",
+        other => unreachable!("symbol_query captured unexpected node kind: {other}"),
+    }
+    .to_string()
+}
+
+pub(crate) fn extract_signature(node: tree_sitter::Node, src: &str) -> Option<String> {
+    let (start_byte, end_byte) = match node.kind() {
+        "interface_declaration" | "type_alias_declaration" => (node.start_byte(), node.end_byte()),
+        "variable_declarator" => {
+            let start_byte = node
+                .parent()
+                .map(|parent| parent.start_byte())
+                .unwrap_or_else(|| node.start_byte());
+            let end_byte = node
+                .child_by_field_name("value")
+                .and_then(|value| value.child_by_field_name("body"))
+                .map(|body| body.start_byte())
+                .unwrap_or_else(|| node.end_byte());
+            (start_byte, end_byte)
+        }
+        _ => {
+            let end_byte = node
+                .child_by_field_name("body")
+                .map(|body| body.start_byte())
+                .unwrap_or_else(|| node.end_byte());
+            (node.start_byte(), end_byte)
+        }
+    };
+
+    if end_byte <= start_byte {
+        return None;
+    }
+
+    let raw = &src[start_byte..end_byte];
+    let normalized = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
+}
+
+pub(crate) fn is_public(node: tree_sitter::Node, src: &str) -> bool {
+    match node.kind() {
+        "method_definition" => {
+            let mut cursor = node.walk();
+            let modifier = node
+                .children(&mut cursor)
+                .find(|child| child.kind() == "accessibility_modifier");
+            match modifier {
+                Some(modifier) => modifier
+                    .utf8_text(src.as_bytes())
+                    .map(|text| text == "public")
+                    .unwrap_or(true),
+                None => true,
+            }
+        }
+        "variable_declarator" => node
+            .parent()
+            .and_then(|parent| parent.parent())
+            .map(|grandparent| grandparent.kind() == "export_statement")
+            .unwrap_or(false),
+        _ => node
+            .parent()
+            .map(|parent| parent.kind() == "export_statement")
+            .unwrap_or(false),
+    }
+}
+
+pub(crate) fn enclosing_definition_name(node: tree_sitter::Node, src: &str) -> Option<String> {
+    let mut current = node.parent();
+    while let Some(ancestor) = current {
+        match ancestor.kind() {
+            "function_declaration" | "method_definition" => {
+                let name_node = ancestor.child_by_field_name("name")?;
+                return name_node.utf8_text(src.as_bytes()).ok().map(str::to_string);
+            }
+            "variable_declarator"
+                if ancestor
+                    .child_by_field_name("value")
+                    .is_some_and(|value| value.kind() == "arrow_function") =>
+            {
+                let name_node = ancestor.child_by_field_name("name")?;
+                return name_node.utf8_text(src.as_bytes()).ok().map(str::to_string);
+            }
+            _ => {}
+        }
+        current = ancestor.parent();
+    }
+    None
+}
+
+pub(crate) fn build_scope(tree: &tree_sitter::Tree, src: &str) -> ScopeTable {
+    let mut entries = Vec::new();
+    walk_imports(tree.root_node(), src, &mut entries);
+    ScopeTable { entries }
+}
+
 pub struct TypeScriptSupport;
 
 impl LanguageSupport for TypeScriptSupport {
@@ -189,111 +296,22 @@ impl LanguageSupport for TypeScriptSupport {
     }
 
     fn symbol_kind(&self, node_kind: &str) -> String {
-        match node_kind {
-            "function_declaration" => "function",
-            "variable_declarator" => "function",
-            "method_definition" => "method",
-            "class_declaration" => "class",
-            "interface_declaration" => "interface",
-            "type_alias_declaration" => "type",
-            "enum_declaration" => "enum",
-            other => unreachable!("symbol_query captured unexpected node kind: {other}"),
-        }
-        .to_string()
+        symbol_kind(node_kind)
     }
 
     fn extract_signature(&self, node: tree_sitter::Node, src: &str) -> Option<String> {
-        let (start_byte, end_byte) = match node.kind() {
-            "interface_declaration" | "type_alias_declaration" => {
-                (node.start_byte(), node.end_byte())
-            }
-            "variable_declarator" => {
-                let start_byte = node
-                    .parent()
-                    .map(|parent| parent.start_byte())
-                    .unwrap_or_else(|| node.start_byte());
-                let end_byte = node
-                    .child_by_field_name("value")
-                    .and_then(|value| value.child_by_field_name("body"))
-                    .map(|body| body.start_byte())
-                    .unwrap_or_else(|| node.end_byte());
-                (start_byte, end_byte)
-            }
-            _ => {
-                let end_byte = node
-                    .child_by_field_name("body")
-                    .map(|body| body.start_byte())
-                    .unwrap_or_else(|| node.end_byte());
-                (node.start_byte(), end_byte)
-            }
-        };
-
-        if end_byte <= start_byte {
-            return None;
-        }
-
-        let raw = &src[start_byte..end_byte];
-        let normalized = raw.split_whitespace().collect::<Vec<_>>().join(" ");
-        if normalized.is_empty() {
-            None
-        } else {
-            Some(normalized)
-        }
+        extract_signature(node, src)
     }
 
     fn is_public(&self, node: tree_sitter::Node, src: &str) -> bool {
-        match node.kind() {
-            "method_definition" => {
-                let mut cursor = node.walk();
-                let modifier = node
-                    .children(&mut cursor)
-                    .find(|child| child.kind() == "accessibility_modifier");
-                match modifier {
-                    Some(modifier) => modifier
-                        .utf8_text(src.as_bytes())
-                        .map(|text| text == "public")
-                        .unwrap_or(true),
-                    None => true,
-                }
-            }
-            "variable_declarator" => node
-                .parent()
-                .and_then(|parent| parent.parent())
-                .map(|grandparent| grandparent.kind() == "export_statement")
-                .unwrap_or(false),
-            _ => node
-                .parent()
-                .map(|parent| parent.kind() == "export_statement")
-                .unwrap_or(false),
-        }
+        is_public(node, src)
     }
 
     fn enclosing_definition_name(&self, node: tree_sitter::Node, src: &str) -> Option<String> {
-        let mut current = node.parent();
-        while let Some(ancestor) = current {
-            match ancestor.kind() {
-                "function_declaration" | "method_definition" => {
-                    let name_node = ancestor.child_by_field_name("name")?;
-                    return name_node.utf8_text(src.as_bytes()).ok().map(str::to_string);
-                }
-                "variable_declarator"
-                    if ancestor
-                        .child_by_field_name("value")
-                        .is_some_and(|value| value.kind() == "arrow_function") =>
-                {
-                    let name_node = ancestor.child_by_field_name("name")?;
-                    return name_node.utf8_text(src.as_bytes()).ok().map(str::to_string);
-                }
-                _ => {}
-            }
-            current = ancestor.parent();
-        }
-        None
+        enclosing_definition_name(node, src)
     }
 
     fn build_scope(&self, tree: &tree_sitter::Tree, src: &str) -> ScopeTable {
-        let mut entries = Vec::new();
-        walk_imports(tree.root_node(), src, &mut entries);
-        ScopeTable { entries }
+        build_scope(tree, src)
     }
 }

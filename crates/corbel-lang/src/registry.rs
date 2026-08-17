@@ -35,6 +35,9 @@ impl LanguageRegistry {
             .register(Box::new(crate::langs::typescript::TypeScriptSupport))
             .expect("built-in languages register without extension conflicts");
         registry
+            .register(Box::new(crate::langs::tsx::TsxSupport))
+            .expect("built-in languages register without extension conflicts");
+        registry
     }
 
     pub fn register(&mut self, support: Box<dyn LanguageSupport>) -> Result<(), RegistryError> {
