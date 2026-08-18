@@ -12,7 +12,7 @@ fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Command::Index { path } => commands::index::run(&path, cli.verbose),
-        Command::Serve => anyhow::bail!("serve is not implemented yet"),
+        Command::Serve { path } => commands::serve::run(&path),
     }
 }
 

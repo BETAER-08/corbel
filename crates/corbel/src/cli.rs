@@ -18,5 +18,8 @@ pub enum Command {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
-    Serve,
+    Serve {
+        #[arg(default_value = ".")]
+        path: PathBuf,
+    },
 }
