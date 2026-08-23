@@ -65,7 +65,7 @@ corbel serve
 `corbel index` walks the repository, parses every supported file, and resolves each call to a specific definition. Running it against corbel's own source produces:
 
 ```
-Indexed 0 files (61 unchanged)
+Indexed 61 files (0 unchanged)
 486 symbols, 3110 references
 
 Internal calls: 664 resolved / 728 total (91.2%)
