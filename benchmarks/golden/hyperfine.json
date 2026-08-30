@@ -1,0 +1,88 @@
+{
+  "repo": "hyperfine",
+  "clone_url": "https://github.com/sharkdp/hyperfine.git",
+  "local_path": "benchmarks/repos/hyperfine",
+  "commit": "f12f3d9f86f3643b3b7deace5e160b1f0f44d2b7",
+  "language": "rust",
+  "search_root": "src",
+  "verified_by": "claude-sonnet-5",
+  "verification_date": "2026-08-30",
+  "verification_method": "Direct reading of source files via the Read tool, with ripgrep used only to enumerate candidate line numbers (never corbel) which were then individually opened and read in context to confirm each is a real call and to identify its enclosing function. corbel was never executed to produce any answer in this file.",
+  "entries": [
+    {
+      "id": "hyperfine-01",
+      "symbol": { "name": "compare_mean_time", "file": "src/benchmark/relative_speed.rs", "line": 16, "kind": "function" },
+      "category": "simple",
+      "tasks": {
+        "callers": [
+          { "file": "src/benchmark/relative_speed.rs", "line": 23, "enclosing_symbol": "fastest_of" },
+          { "file": "src/benchmark/relative_speed.rs", "line": 36, "enclosing_symbol": "compute_relative_speeds" },
+          { "file": "src/benchmark/relative_speed.rs", "line": 79, "enclosing_symbol": "compute_relative_speeds" }
+        ]
+      },
+      "verification_note": "pub fn, unique name in the whole crate (`rg -n \"compare_mean_time\\(\" src/` returns only these 3 call sites plus the declaration). Two calls are inside compute_relative_speeds (one direct at line 36, one inside a sort_unstable_by closure at line 79) so that enclosing symbol appears twice, matching how corbel emits one caller row per resolved reference rather than deduplicating by enclosing symbol."
+    },
+    {
+      "id": "hyperfine-02",
+      "symbol": { "name": "compute_relative_speeds", "file": "src/benchmark/relative_speed.rs", "line": 27, "kind": "function" },
+      "category": "simple",
+      "tasks": {
+        "callers": [
+          { "file": "src/benchmark/relative_speed.rs", "line": 95, "enclosing_symbol": "compute_with_check_from_reference" },
+          { "file": "src/benchmark/relative_speed.rs", "line": 108, "enclosing_symbol": "compute_with_check" },
+          { "file": "src/benchmark/relative_speed.rs", "line": 118, "enclosing_symbol": "compute" }
+        ]
+      },
+      "verification_note": "Private (non-pub) fn. `rg -n \"compute_relative_speeds\\(\" src/` returns exactly the declaration plus these 3 call sites, all in the same file as the definition."
+    },
+    {
+      "id": "hyperfine-03",
+      "symbol": { "name": "fastest_of", "file": "src/benchmark/relative_speed.rs", "line": 20, "kind": "function" },
+      "category": "qualified_path_call",
+      "tasks": {
+        "callers": [
+          { "file": "src/benchmark/relative_speed.rs", "line": 91, "enclosing_symbol": "compute_with_check_from_reference" },
+          { "file": "src/benchmark/relative_speed.rs", "line": 102, "enclosing_symbol": "compute_with_check" },
+          { "file": "src/benchmark/relative_speed.rs", "line": 116, "enclosing_symbol": "compute" },
+          { "file": "src/benchmark/scheduler.rs", "line": 75, "enclosing_symbol": "Scheduler::print_relative_speed_comparison", "qualified_path_call": true }
+        ]
+      },
+      "verification_note": "pub fn. Three same-file callers use the bare identifier `fastest_of(...)`. The fourth, real caller at scheduler.rs:75 calls it as `relative_speed::fastest_of(&self.results)` - a module-path-qualified call. corbel's Rust reference_query (crates/corbel-lang/src/langs/rust.rs REFERENCE_QUERY) only captures `call_expression` nodes whose `function` is a plain `(identifier)` or a `(field_expression)`; a `function: (scoped_identifier)` node like `relative_speed::fastest_of` matches neither pattern and produces no relationship row at all. corbel is therefore structurally blind to this caller (a guaranteed false negative), while grep/ripgrep find it immediately by text. This mirrors an identical structural gap independently found in corbel's own repository (see corbel.json's tsx.rs -> typescript::is_public case)."
+    },
+    {
+      "id": "hyperfine-04",
+      "symbol": { "name": "compute_with_check_from_reference", "file": "src/benchmark/relative_speed.rs", "line": 86, "kind": "function" },
+      "category": "qualified_path_call",
+      "tasks": {
+        "callers": [
+          { "file": "src/benchmark/relative_speed.rs", "line": 167, "enclosing_symbol": "test_compute_relative_speed_with_reference" },
+          { "file": "src/benchmark/scheduler.rs", "line": 77, "enclosing_symbol": "Scheduler::print_relative_speed_comparison", "qualified_path_call": true }
+        ]
+      },
+      "verification_note": "Same structural gap as hyperfine-03: scheduler.rs:77 calls `relative_speed::compute_with_check_from_reference(...)`, a scoped_identifier call invisible to corbel's Rust reference_query. The only caller corbel can in principle resolve is the in-file test at line 167."
+    },
+    {
+      "id": "hyperfine-05",
+      "symbol": { "name": "run_command_and_measure_common", "file": "src/benchmark/executor.rs", "line": 58, "kind": "function" },
+      "category": "simple",
+      "tasks": {
+        "callers": [
+          { "file": "src/benchmark/executor.rs", "line": 140, "enclosing_symbol": "RawExecutor::run_command_and_measure" },
+          { "file": "src/benchmark/executor.rs", "line": 205, "enclosing_symbol": "ShellExecutor::run_command_and_measure" }
+        ]
+      },
+      "verification_note": "Private fn, unique name in the crate. Both callers are in the same file as the definition, calling it as a bare identifier (not through the Executor trait), so this is unambiguous despite being adjacent to the dynamic-dispatch case below."
+    },
+    {
+      "id": "hyperfine-06",
+      "symbol": { "name": "run_command_and_measure", "file": "src/benchmark/executor.rs", "line": 186, "kind": "method", "owner": "ShellExecutor" },
+      "category": "dynamic_dispatch",
+      "tasks": {
+        "callers": [
+          { "file": "src/benchmark/executor.rs", "line": 251, "enclosing_symbol": "ShellExecutor::calibrate" }
+        ]
+      },
+      "verification_note": "`run_command_and_measure` is a required method of the `Executor` trait (declared, bodyless, at executor.rs:37) with 3 concrete implementations: RawExecutor (line 133), ShellExecutor (line 186, this entry), and MockExecutor (line 323). Exactly one call site is statically provable to target ShellExecutor's implementation specifically: executor.rs:251, inside `impl Executor for ShellExecutor`'s own calibrate method, where `self` has concrete type `&mut ShellExecutor` so Rust resolves the call at compile time with no ambiguity. Four further textual occurrences of `.run_command_and_measure(` exist at src/benchmark/mod.rs:64,215,247,309, all calling through `Benchmark.executor: &'a dyn Executor` (mod.rs:38, a trait object) - genuine runtime dynamic dispatch with no way to prove statically (from source alone) which of the 3 impls actually executes for a given hyperfine invocation. Those 4 sites are intentionally excluded from verified_callers; a tool that reports them as callers of ShellExecutor::run_command_and_measure specifically is scored as a false positive, since the same 4 sites are equally plausible callers of RawExecutor's or MockExecutor's implementations and no static ground truth singles out ShellExecutor."
+    }
+  ]
+}

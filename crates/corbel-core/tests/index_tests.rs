@@ -1,0 +1,522 @@
+use corbel_core::index::index_repo;
+use corbel_core::path::RepoRoot;
+use corbel_core::store::migrate::open_connection;
+use corbel_lang::langs::javascript::JavaScriptSupport;
+use corbel_lang::langs::python::PythonSupport;
+use corbel_lang::langs::rust::RustSupport;
+use corbel_lang::langs::typescript::TypeScriptSupport;
+use corbel_lang::registry::LanguageRegistry;
+use rusqlite::Connection;
+use std::fs;
+use tempfile::tempdir;
+
+fn registry() -> LanguageRegistry {
+    let mut registry = LanguageRegistry::new();
+    registry.register(Box::new(RustSupport)).unwrap();
+    registry
+}
+
+fn db() -> (Connection, tempfile::TempDir) {
+    let dir = tempdir().unwrap();
+    let conn = open_connection(dir.path().join("index.db")).unwrap();
+    (conn, dir)
+}
+
+fn count(conn: &Connection, sql: &str) -> i64 {
+    conn.query_row(sql, [], |row| row.get(0)).unwrap()
+}
+
+#[test]
+fn indexes_files_and_stores_symbols() {
+    let repo_dir = tempdir().unwrap();
+    fs::write(
+        repo_dir.path().join("a.rs"),
+        b"pub fn add(a: i32, b: i32) -> i32 { a + b }\nfn helper() {}\n",
+    )
+    .unwrap();
+    fs::write(
+        repo_dir.path().join("b.rs"),
+        b"pub struct Point { pub x: i32 }\n",
+    )
+    .unwrap();
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let (conn, _db_dir) = db();
+    let parser = registry();
+
+    let stats = index_repo(&root, &conn, &parser).unwrap();
+
+    assert_eq!(stats.files_indexed, 2);
+    assert_eq!(stats.files_skipped_unchanged, 0);
+    assert_eq!(stats.symbols_stored, 3);
+
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM files"), 2);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM symbols"), 3);
+}
+
+#[test]
+fn symbol_fields_match_parsed_source() {
+    let repo_dir = tempdir().unwrap();
+    fs::write(
+        repo_dir.path().join("a.rs"),
+        b"pub fn add(a: i32, b: i32) -> i32 { a + b }\n",
+    )
+    .unwrap();
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let (conn, _db_dir) = db();
+    let parser = registry();
+
+    index_repo(&root, &conn, &parser).unwrap();
+
+    let (name, kind, line, signature, is_public): (String, String, i64, Option<String>, i64) = conn
+        .query_row(
+            "SELECT name, kind, line, signature, is_public FROM symbols",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .unwrap();
+
+    assert_eq!(name, "add");
+    assert_eq!(kind, "function");
+    assert_eq!(line, 1);
+    assert_eq!(
+        signature.as_deref(),
+        Some("pub fn add(a: i32, b: i32) -> i32")
+    );
+    assert_eq!(is_public, 1);
+}
+
+#[test]
+fn stores_imports_from_use_declarations() {
+    let repo_dir = tempdir().unwrap();
+    fs::write(
+        repo_dir.path().join("a.rs"),
+        b"use std::collections::HashMap;\n\nfn main() {}\n",
+    )
+    .unwrap();
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let (conn, _db_dir) = db();
+    let parser = registry();
+
+    let stats = index_repo(&root, &conn, &parser).unwrap();
+
+    assert_eq!(stats.imports_stored, 1);
+    let (local_name, source_path, kind): (String, String, String) = conn
+        .query_row(
+            "SELECT local_name, source_path, kind FROM imports",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(local_name, "HashMap");
+    assert_eq!(source_path, "std::collections::HashMap");
+    assert_eq!(kind, "direct");
+}
+
+#[test]
+fn second_index_run_skips_unchanged_files() {
+    let repo_dir = tempdir().unwrap();
+    fs::write(repo_dir.path().join("a.rs"), b"fn a() {}\n").unwrap();
+    fs::write(repo_dir.path().join("b.rs"), b"fn b() {}\n").unwrap();
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let (conn, _db_dir) = db();
+    let parser = registry();
+
+    let first = index_repo(&root, &conn, &parser).unwrap();
+    assert_eq!(first.files_indexed, 2);
+    assert_eq!(first.files_skipped_unchanged, 0);
+
+    let second = index_repo(&root, &conn, &parser).unwrap();
+    assert_eq!(second.files_indexed, 0);
+    assert_eq!(second.files_skipped_unchanged, 2);
+
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM symbols"), 2);
+}
+
+#[test]
+fn changed_file_replaces_old_symbols_without_duplicating() {
+    let repo_dir = tempdir().unwrap();
+    let file_path = repo_dir.path().join("a.rs");
+    fs::write(&file_path, b"fn a() {}\nfn b() {}\n").unwrap();
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let (conn, _db_dir) = db();
+    let parser = registry();
+
+    index_repo(&root, &conn, &parser).unwrap();
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM symbols"), 2);
+
+    fs::write(&file_path, b"fn c() {}\n").unwrap();
+    let stats = index_repo(&root, &conn, &parser).unwrap();
+
+    assert_eq!(stats.files_indexed, 1);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM symbols"), 1);
+
+    let name: String = conn
+        .query_row("SELECT name FROM symbols", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(name, "c");
+}
+
+#[test]
+fn deleted_file_is_removed_along_with_its_symbols() {
+    let repo_dir = tempdir().unwrap();
+    let file_path = repo_dir.path().join("a.rs");
+    fs::write(&file_path, b"fn a() {}\n").unwrap();
+    fs::write(repo_dir.path().join("b.rs"), b"fn b() {}\n").unwrap();
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let (conn, _db_dir) = db();
+    let parser = registry();
+
+    index_repo(&root, &conn, &parser).unwrap();
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM files"), 2);
+
+    fs::remove_file(&file_path).unwrap();
+    let stats = index_repo(&root, &conn, &parser).unwrap();
+
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM files"), 1);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM symbols"), 1);
+    assert_eq!(stats.files_indexed, 0);
+    assert_eq!(stats.files_skipped_unchanged, 1);
+
+    let path: String = conn
+        .query_row("SELECT path FROM files", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(path, "b.rs");
+}
+
+#[test]
+fn call_inside_function_is_attributed_to_caller() {
+    let repo_dir = tempdir().unwrap();
+    fs::write(
+        repo_dir.path().join("a.rs"),
+        b"fn a() { b(); }\nfn b() {}\n",
+    )
+    .unwrap();
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let (conn, _db_dir) = db();
+    let parser = registry();
+
+    let stats = index_repo(&root, &conn, &parser).unwrap();
+
+    assert_eq!(stats.relationships_stored, 1);
+    assert_eq!(stats.references_skipped_no_caller, 0);
+
+    let (caller_name, callee_name, resolution): (String, String, String) = conn
+        .query_row(
+            "SELECT symbols.name, relationships.callee_name, relationships.resolution
+             FROM relationships JOIN symbols ON symbols.id = relationships.caller_symbol_id",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+
+    assert_eq!(caller_name, "a");
+    assert_eq!(callee_name, "b");
+    assert_eq!(resolution, "same-file");
+}
+
+#[test]
+fn every_relationship_row_carries_a_resolution_value() {
+    let repo_dir = tempdir().unwrap();
+    fs::write(
+        repo_dir.path().join("a.rs"),
+        b"fn a() { b(); c(); }\nfn b() {}\nfn c() {}\n",
+    )
+    .unwrap();
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let (conn, _db_dir) = db();
+    let parser = registry();
+
+    index_repo(&root, &conn, &parser).unwrap();
+
+    let valid_resolution_count = count(
+        &conn,
+        "SELECT COUNT(*) FROM relationships
+         WHERE resolution IN ('same-file', 'scoped', 'global-unique', 'external', 'unresolved')",
+    );
+    let total_count = count(&conn, "SELECT COUNT(*) FROM relationships");
+    assert_eq!(valid_resolution_count, total_count);
+    assert_eq!(total_count, 2);
+}
+
+#[test]
+fn top_level_call_is_skipped_and_counted() {
+    let repo_dir = tempdir().unwrap();
+    fs::write(
+        repo_dir.path().join("a.rs"),
+        b"fn b() {}\nstatic X: i32 = b();\n",
+    )
+    .unwrap();
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let (conn, _db_dir) = db();
+    let parser = registry();
+
+    let stats = index_repo(&root, &conn, &parser).unwrap();
+
+    assert_eq!(stats.relationships_stored, 0);
+    assert_eq!(stats.references_skipped_no_caller, 1);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM relationships"), 0);
+}
+
+#[test]
+fn reindexing_does_not_duplicate_relationships() {
+    let repo_dir = tempdir().unwrap();
+    let file_path = repo_dir.path().join("a.rs");
+    fs::write(&file_path, b"fn a() { b(); }\nfn b() {}\n").unwrap();
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let (conn, _db_dir) = db();
+    let parser = registry();
+
+    index_repo(&root, &conn, &parser).unwrap();
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM relationships"), 1);
+
+    fs::write(&file_path, b"fn a() { b(); b(); }\nfn b() {}\n").unwrap();
+    let stats = index_repo(&root, &conn, &parser).unwrap();
+
+    assert_eq!(stats.relationships_stored, 2);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM relationships"), 2);
+}
+
+#[test]
+fn multiple_callers_in_same_file_attribute_correctly() {
+    let repo_dir = tempdir().unwrap();
+    fs::write(
+        repo_dir.path().join("a.rs"),
+        b"fn a() { x(); }\nfn b() { y(); }\nfn x() {}\nfn y() {}\n",
+    )
+    .unwrap();
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let (conn, _db_dir) = db();
+    let parser = registry();
+
+    let stats = index_repo(&root, &conn, &parser).unwrap();
+    assert_eq!(stats.relationships_stored, 2);
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT symbols.name, relationships.callee_name
+             FROM relationships JOIN symbols ON symbols.id = relationships.caller_symbol_id
+             ORDER BY symbols.name",
+        )
+        .unwrap();
+    let rows: Vec<(String, String)> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect();
+
+    assert_eq!(
+        rows,
+        vec![
+            ("a".to_string(), "x".to_string()),
+            ("b".to_string(), "y".to_string()),
+        ]
+    );
+}
+
+#[test]
+fn index_stats_relationships_stored_matches_table_count() {
+    let repo_dir = tempdir().unwrap();
+    fs::write(
+        repo_dir.path().join("a.rs"),
+        b"fn a() { b(); c(); }\nfn b() { c(); }\nfn c() {}\n",
+    )
+    .unwrap();
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let (conn, _db_dir) = db();
+    let parser = registry();
+
+    let stats = index_repo(&root, &conn, &parser).unwrap();
+
+    assert_eq!(
+        stats.relationships_stored as i64,
+        count(&conn, "SELECT COUNT(*) FROM relationships")
+    );
+    assert_eq!(stats.relationships_stored, 3);
+}
+
+#[test]
+fn python_repository_indexes_and_resolves_through_the_same_pipeline() {
+    let repo_dir = tempdir().unwrap();
+    fs::write(
+        repo_dir.path().join("a.py"),
+        b"from b import helper\n\n\ndef caller():\n    helper()\n    local()\n\n\ndef local():\n    pass\n",
+    )
+    .unwrap();
+    fs::write(repo_dir.path().join("b.py"), b"def helper():\n    pass\n").unwrap();
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let (conn, _db_dir) = db();
+    let mut parser = LanguageRegistry::new();
+    parser.register(Box::new(PythonSupport)).unwrap();
+
+    let stats = index_repo(&root, &conn, &parser).unwrap();
+
+    assert_eq!(stats.files_indexed, 2);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM files"), 2);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM symbols"), 3);
+
+    let (local_resolution, local_callee_path): (String, Option<String>) = conn
+        .query_row(
+            "SELECT relationships.resolution, files.path
+             FROM relationships
+             JOIN symbols ON symbols.id = relationships.caller_symbol_id
+             LEFT JOIN files ON files.id = relationships.callee_file_id
+             WHERE relationships.callee_name = 'local'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(local_resolution, "same-file");
+    assert_eq!(local_callee_path.as_deref(), Some("a.py"));
+
+    let (helper_resolution, helper_callee_path): (String, Option<String>) = conn
+        .query_row(
+            "SELECT relationships.resolution, files.path
+             FROM relationships
+             JOIN symbols ON symbols.id = relationships.caller_symbol_id
+             LEFT JOIN files ON files.id = relationships.callee_file_id
+             WHERE relationships.callee_name = 'helper'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(helper_resolution, "scoped");
+    assert_eq!(helper_callee_path.as_deref(), Some("b.py"));
+
+    assert_eq!(stats.resolution.same_file, 1);
+    assert_eq!(stats.resolution.scoped, 1);
+}
+
+#[test]
+fn javascript_repository_indexes_and_resolves_through_the_same_pipeline() {
+    let repo_dir = tempdir().unwrap();
+    fs::write(
+        repo_dir.path().join("a.js"),
+        b"import { helper } from \"./b\";\n\nexport function caller() {\n    helper();\n    local();\n}\n\nfunction local() {\n    return 1;\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        repo_dir.path().join("b.js"),
+        b"export function helper() {\n    return 1;\n}\n",
+    )
+    .unwrap();
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let (conn, _db_dir) = db();
+    let mut parser = LanguageRegistry::new();
+    parser.register(Box::new(JavaScriptSupport)).unwrap();
+
+    let stats = index_repo(&root, &conn, &parser).unwrap();
+
+    assert_eq!(stats.files_indexed, 2);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM files"), 2);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM symbols"), 3);
+
+    let (local_resolution, local_callee_path): (String, Option<String>) = conn
+        .query_row(
+            "SELECT relationships.resolution, files.path
+             FROM relationships
+             JOIN symbols ON symbols.id = relationships.caller_symbol_id
+             LEFT JOIN files ON files.id = relationships.callee_file_id
+             WHERE relationships.callee_name = 'local'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(local_resolution, "same-file");
+    assert_eq!(local_callee_path.as_deref(), Some("a.js"));
+
+    let (helper_resolution, helper_callee_path): (String, Option<String>) = conn
+        .query_row(
+            "SELECT relationships.resolution, files.path
+             FROM relationships
+             JOIN symbols ON symbols.id = relationships.caller_symbol_id
+             LEFT JOIN files ON files.id = relationships.callee_file_id
+             WHERE relationships.callee_name = 'helper'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(helper_resolution, "scoped");
+    assert_eq!(helper_callee_path.as_deref(), Some("b.js"));
+
+    assert_eq!(stats.resolution.same_file, 1);
+    assert_eq!(stats.resolution.scoped, 1);
+}
+
+#[test]
+fn typescript_repository_indexes_and_resolves_through_the_same_pipeline() {
+    let repo_dir = tempdir().unwrap();
+    fs::write(
+        repo_dir.path().join("a.ts"),
+        b"import { helper } from \"./b\";\n\nexport function caller() {\n    helper();\n    local();\n}\n\nfunction local() {\n    return 1;\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        repo_dir.path().join("b.ts"),
+        b"export function helper() {\n    return 1;\n}\n",
+    )
+    .unwrap();
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let (conn, _db_dir) = db();
+    let mut parser = LanguageRegistry::new();
+    parser.register(Box::new(TypeScriptSupport)).unwrap();
+
+    let stats = index_repo(&root, &conn, &parser).unwrap();
+
+    assert_eq!(stats.files_indexed, 2);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM files"), 2);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM symbols"), 3);
+
+    let (local_resolution, local_callee_path): (String, Option<String>) = conn
+        .query_row(
+            "SELECT relationships.resolution, files.path
+             FROM relationships
+             JOIN symbols ON symbols.id = relationships.caller_symbol_id
+             LEFT JOIN files ON files.id = relationships.callee_file_id
+             WHERE relationships.callee_name = 'local'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(local_resolution, "same-file");
+    assert_eq!(local_callee_path.as_deref(), Some("a.ts"));
+
+    let (helper_resolution, helper_callee_path): (String, Option<String>) = conn
+        .query_row(
+            "SELECT relationships.resolution, files.path
+             FROM relationships
+             JOIN symbols ON symbols.id = relationships.caller_symbol_id
+             LEFT JOIN files ON files.id = relationships.callee_file_id
+             WHERE relationships.callee_name = 'helper'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(helper_resolution, "scoped");
+    assert_eq!(helper_callee_path.as_deref(), Some("b.ts"));
+
+    assert_eq!(stats.resolution.same_file, 1);
+    assert_eq!(stats.resolution.scoped, 1);
+}

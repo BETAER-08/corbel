@@ -1,0 +1,108 @@
+{
+  "repo": "itsdangerous",
+  "clone_url": "https://github.com/pallets/itsdangerous.git",
+  "local_path": "benchmarks/repos/itsdangerous",
+  "commit": "672971d66a2ef9f85151e53283113f33d642dabd",
+  "language": "python",
+  "search_root": "src",
+  "search_root_note": "Ground truth was verified only against src/itsdangerous/ (the library itself). tests/test_itsdangerous/ also calls several of these functions (e.g. want_bytes, unsign) but resolving those call sites requires tracing pytest fixture indirection (which concrete Signer subclass a given fixture constructs) that is beyond what static text search, ctags, or corbel's static analysis can be expected to determine, and beyond what was feasible to hand-verify exhaustively here. All four tools are scoped to src/ uniformly - including corbel, whose own repo-wide index results are filtered to src/ before scoring - so no tool is advantaged or penalized by the test suite's presence.",
+  "verified_by": "claude-sonnet-5",
+  "verification_date": "2026-08-30",
+  "verification_method": "Direct reading of source files via the Read tool, with ripgrep used to enumerate candidate line numbers and a small standalone Python script (not corbel) used to map each matched line to its nearest preceding `def` at or before that line, whose output was then spot-checked against the actual source for every entry below. corbel was never executed to produce any answer in this file.",
+  "entries": [
+    {
+      "id": "itsdangerous-01",
+      "symbol": { "name": "want_bytes", "file": "src/itsdangerous/encoding.py", "line": 11, "kind": "function" },
+      "category": "multi_hop",
+      "tasks": {
+        "callers": [
+          { "file": "src/itsdangerous/timed.py", "line": 47, "enclosing_symbol": "TimestampSigner.sign" },
+          { "file": "src/itsdangerous/timed.py", "line": 49, "enclosing_symbol": "TimestampSigner.sign" },
+          { "file": "src/itsdangerous/timed.py", "line": 95, "enclosing_symbol": "TimestampSigner.unsign" },
+          { "file": "src/itsdangerous/timed.py", "line": 199, "enclosing_symbol": "TimedSerializer.loads" },
+          { "file": "src/itsdangerous/signer.py", "line": 71, "enclosing_symbol": "_make_keys_list" },
+          { "file": "src/itsdangerous/signer.py", "line": 73, "enclosing_symbol": "_make_keys_list" },
+          { "file": "src/itsdangerous/signer.py", "line": 144, "enclosing_symbol": "Signer.__init__" },
+          { "file": "src/itsdangerous/signer.py", "line": 154, "enclosing_symbol": "Signer.__init__" },
+          { "file": "src/itsdangerous/signer.py", "line": 198, "enclosing_symbol": "Signer.derive_key" },
+          { "file": "src/itsdangerous/signer.py", "line": 217, "enclosing_symbol": "Signer.get_signature" },
+          { "file": "src/itsdangerous/signer.py", "line": 224, "enclosing_symbol": "Signer.sign" },
+          { "file": "src/itsdangerous/signer.py", "line": 234, "enclosing_symbol": "Signer.verify_signature" },
+          { "file": "src/itsdangerous/signer.py", "line": 246, "enclosing_symbol": "Signer.unsign" },
+          { "file": "src/itsdangerous/serializer.py", "line": 211, "enclosing_symbol": "Serializer.__init__" },
+          { "file": "src/itsdangerous/serializer.py", "line": 276, "enclosing_symbol": "Serializer.dump_payload" },
+          { "file": "src/itsdangerous/serializer.py", "line": 314, "enclosing_symbol": "Serializer.dumps" },
+          { "file": "src/itsdangerous/serializer.py", "line": 334, "enclosing_symbol": "Serializer.loads" },
+          { "file": "src/itsdangerous/encoding.py", "line": 24, "enclosing_symbol": "base64_encode" },
+          { "file": "src/itsdangerous/encoding.py", "line": 32, "enclosing_symbol": "base64_decode" }
+        ]
+      },
+      "verification_note": "want_bytes is a unique, unambiguous name across the package with 19 real call sites (18 outside its own file plus 2 inside encoding.py itself, at lines 24 and 32, inside sibling functions base64_encode/base64_decode). Every line above was individually opened and read; several sit inside classes with multiple same-name overload stubs (Signer.__init__ has 6 @overload-decorated signatures at lines 108-190, TimestampSigner.unsign has 2 @t.overload stubs at 57/65 before the real implementation at 72) so the enclosing-def search intentionally walks to the nearest preceding `def` regardless of decorator, which lands on the real (non-stub) implementation in every case here since typing stubs have no body to call anything from."
+    },
+    {
+      "id": "itsdangerous-02",
+      "symbol": { "name": "get_signature", "file": "src/itsdangerous/signer.py", "line": 215, "kind": "method", "owner": "Signer" },
+      "category": "overload_ambiguous_name",
+      "tasks": {
+        "callers": [
+          { "file": "src/itsdangerous/signer.py", "line": 225, "enclosing_symbol": "Signer.sign" },
+          { "file": "src/itsdangerous/timed.py", "line": 51, "enclosing_symbol": "TimestampSigner.sign" }
+        ]
+      },
+      "verification_note": "`get_signature` is defined 4 times in this package: SigningAlgorithm.get_signature (abstract, signer.py:20, 2 args beyond self), NoneAlgorithm.get_signature (signer.py:36, 2 args), HMACAlgorithm.get_signature (signer.py:62, 2 args), and Signer.get_signature (this entry, signer.py:215, 1 arg beyond self). This entry targets specifically Signer.get_signature. `rg -n \"get_signature\\(\" src/` returns 7 lines total: the declaration/2 other definitions (20,36,62), one call inside get_signature itself to a *different* get_signature (signer.py:219, self.algorithm.get_signature(key, value) - 2-arg form, targets the SigningAlgorithm family, not this entry - see itsdangerous-03), and the 2 real 1-arg callers of this entry listed above. A tool that cannot distinguish the 1-arg Signer.get_signature call shape from the 2-arg SigningAlgorithm.get_signature call shape will over-count."
+    },
+    {
+      "id": "itsdangerous-03",
+      "symbol": { "name": "get_signature", "file": "src/itsdangerous/signer.py", "line": 215, "kind": "method", "owner": "Signer" },
+      "category": "dynamic_dispatch",
+      "tasks": {
+        "callees": {
+          "ambiguous": true,
+          "ground_truth": [
+            { "name": "get_signature", "note": "self.algorithm.get_signature(key, value) at signer.py:219; self.algorithm: SigningAlgorithm is duck-typed and set to a NoneAlgorithm (signer.py:36) or HMACAlgorithm (signer.py:62) instance at construction time (Signer.__init__ digest_method parameter), not determinable from this call site alone." }
+          ]
+        }
+      },
+      "verification_note": "Python has no static trait-object type the way Rust does, but the effect is identical: self.algorithm is typed SigningAlgorithm (an unenforced duck-typed base with only an interface contract, signer.py:15-24) and get_signature's actual target is chosen by whichever concrete class was assigned to self.algorithm at runtime. No single verified_callees entry is correct in isolation; NoneAlgorithm.get_signature and HMACAlgorithm.get_signature are equally valid targets from source alone. This is the Python duck-typing counterpart to hyperfine-06 and corbel-05's Rust dyn-trait dispatch."
+    },
+    {
+      "id": "itsdangerous-04",
+      "symbol": { "name": "unsign", "file": "src/itsdangerous/signer.py", "line": 244, "kind": "method", "owner": "Signer" },
+      "category": "simple",
+      "tasks": {
+        "callers": [
+          { "file": "src/itsdangerous/timed.py", "line": 89, "enclosing_symbol": "TimestampSigner.unsign", "note": "super().unsign(signed_value) - single inheritance, statically resolvable." },
+          { "file": "src/itsdangerous/signer.py", "line": 263, "enclosing_symbol": "Signer.validate" },
+          { "file": "src/itsdangerous/serializer.py", "line": 339, "enclosing_symbol": "Serializer.loads" }
+        ]
+      },
+      "verification_note": "`unsign` is also defined on TimestampSigner (timed.py, 2 @t.overload stubs at 57/65 plus the real implementation at 72), which overrides this Signer.unsign for timed serializers. The 3 callers listed all statically resolve to this base Signer.unsign: timed.py:89 uses explicit `super()`, which Python resolves via TimestampSigner's single base class (Signer) with no ambiguity; signer.py:263 is a same-class call; serializer.py:339 calls `.unsign(...)` on a variable whose declared/constructed type in Serializer.loads's own code path is plain Signer (TimedSerializer overrides loads/loads_unsafe separately in timed.py rather than reusing this path). rg -n \"\\.unsign\\(\" src/ returns exactly these 3 non-definition lines plus one more, timed.py:164, which calls self.unsign on a TimestampSigner instance (excluded from this entry's ground truth since it targets TimestampSigner.unsign, not Signer.unsign)."
+    },
+    {
+      "id": "itsdangerous-05",
+      "symbol": { "name": "base64_encode", "file": "src/itsdangerous/encoding.py", "line": 20, "kind": "function" },
+      "category": "simple",
+      "tasks": {
+        "callers": [
+          { "file": "src/itsdangerous/url_safe.py", "line": 64, "enclosing_symbol": "URLSafeSerializerMixin.dump_payload" },
+          { "file": "src/itsdangerous/timed.py", "line": 48, "enclosing_symbol": "TimestampSigner.sign" },
+          { "file": "src/itsdangerous/signer.py", "line": 220, "enclosing_symbol": "Signer.get_signature" }
+        ]
+      },
+      "verification_note": "Unique name across the package. `rg -n \"base64_encode\\(\" src/` returns the declaration plus exactly these 3 call sites."
+    },
+    {
+      "id": "itsdangerous-06",
+      "symbol": { "name": "base64_decode", "file": "src/itsdangerous/encoding.py", "line": 28, "kind": "function" },
+      "category": "simple",
+      "tasks": {
+        "callers": [
+          { "file": "src/itsdangerous/url_safe.py", "line": 37, "enclosing_symbol": "URLSafeSerializerMixin.load_payload" },
+          { "file": "src/itsdangerous/timed.py", "line": 113, "enclosing_symbol": "TimestampSigner.unsign" },
+          { "file": "src/itsdangerous/signer.py", "line": 230, "enclosing_symbol": "Signer.verify_signature" }
+        ]
+      },
+      "verification_note": "Unique name across the package. `rg -n \"base64_decode\\(\" src/` returns the declaration plus exactly these 3 call sites."
+    }
+  ]
+}

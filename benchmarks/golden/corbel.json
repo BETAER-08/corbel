@@ -1,0 +1,85 @@
+{
+  "repo": "corbel",
+  "clone_url": null,
+  "local_path": ".",
+  "commit": "28826956babde9534f9b50c7c8a584088e9abf55",
+  "language": "rust",
+  "verified_by": "claude-sonnet-5",
+  "verification_date": "2026-08-30",
+  "verification_method": "Direct reading of source files via the Read tool, with ripgrep used only to enumerate candidate line numbers (never corbel) which were then individually opened and read in context to confirm each is a real call and to identify its enclosing function. corbel was never executed to produce any answer in this file.",
+  "scope_note": "Multi-hop impact tasks are omitted for this repo: nearly every internal function is called directly by dozens of #[test] functions across crates/*/tests/*.rs, so a second hop from almost any starting symbol explodes past what can be exhaustively hand-verified at this effort level. Multi-hop coverage instead comes from the OSS repos in hyperfine.json and itsdangerous.json, whose production code has smaller, hand-traceable call chains.",
+  "entries": [
+    {
+      "id": "corbel-01",
+      "symbol": { "name": "resolve_all", "file": "crates/corbel-core/src/resolve.rs", "line": 27, "kind": "function" },
+      "category": "simple",
+      "tasks": {
+        "callers": [
+          { "file": "crates/corbel-core/src/index.rs", "line": 173, "enclosing_symbol": "index_repo" }
+        ]
+      },
+      "verification_note": "index.rs imports resolve_all via `use crate::resolve::{ResolutionStats, resolve_all};` (index.rs:10) and calls it once at index.rs:173 inside index_repo. `rg -n \"resolve_all\" --type rust` returns exactly these two non-definition lines plus the pub fn declaration itself; no other call sites exist in the repo."
+    },
+    {
+      "id": "corbel-02",
+      "symbol": { "name": "find_symbol_rows", "file": "crates/corbel-core/src/query.rs", "line": 46, "kind": "function" },
+      "category": "simple",
+      "tasks": {
+        "callers": [
+          { "file": "crates/corbel-core/src/query.rs", "line": 169, "enclosing_symbol": "get_symbol" },
+          { "file": "crates/corbel-core/src/query.rs", "line": 287, "enclosing_symbol": "impact" }
+        ]
+      },
+      "verification_note": "find_symbol_rows is a private (non-pub) fn in query.rs. `rg -n \"find_symbol_rows\" --type rust` returns exactly its own declaration plus two call sites, both in query.rs itself (get_symbol at line 169, impact at line 287). No other file references this name."
+    },
+    {
+      "id": "corbel-03",
+      "symbol": { "name": "escape_like_pattern", "file": "crates/corbel-core/src/query.rs", "line": 318, "kind": "function" },
+      "category": "simple",
+      "tasks": {
+        "callers": [
+          { "file": "crates/corbel-core/src/query.rs", "line": 346, "enclosing_symbol": "find" }
+        ]
+      },
+      "verification_note": "Private fn, single call site inside find() at query.rs:346 (`let escaped = escape_like_pattern(query);`). Confirmed via `rg -n escape_like_pattern crates/corbel-core/src/query.rs` returning exactly the declaration and this one call."
+    },
+    {
+      "id": "corbel-04",
+      "symbol": { "name": "is_public", "file": "crates/corbel-lang/src/langs/typescript.rs", "line": 223, "kind": "function" },
+      "category": "overload_ambiguous_name",
+      "tasks": {
+        "callers": [
+          { "file": "crates/corbel-lang/src/langs/typescript.rs", "line": 307, "enclosing_symbol": "TypeScriptSupport::is_public" }
+        ]
+      },
+      "verification_note": "The name `is_public` is defined 8 separate times in this repo: as a required (bodyless) trait method in support.rs:44, as 5 separate trait-impl methods (rust.rs:216, python.rs:180, typescript.rs:306, tsx.rs:61, javascript.rs:99), as a free helper fn in typescript.rs:223 (this entry) and javascript.rs:54, and as a mock impl inside crates/corbel-lang/tests/registry_tests.rs:34. This entry targets specifically the free function at typescript.rs:223, whose only real caller is TypeScriptSupport::is_public at typescript.rs:307, which calls the unqualified `is_public(node, src)` in the same file. A name-only text search for `is_public(` will surface all ~13 definition+call sites across the repo, most of which are not this symbol; a tool is only correct here if it isolates the one call site that actually targets typescript.rs:223 rather than any of the other 7 same-named definitions."
+    },
+    {
+      "id": "corbel-05",
+      "symbol": { "name": "extract_symbols", "file": "crates/corbel-lang/src/support.rs", "line": 50, "kind": "function" },
+      "category": "dynamic_dispatch",
+      "tasks": {
+        "callees": {
+          "ambiguous": true,
+          "ground_truth": [
+            { "name": "symbol_kind", "note": "trait method, called as self.symbol_kind(...) at support.rs:91; 5 concrete definitions exist (rust.rs, python.rs, typescript.rs, tsx.rs reuses typescript::symbol_kind, javascript.rs), selected only at runtime by which Box<dyn LanguageSupport> `self` is." },
+            { "name": "extract_signature", "note": "trait method, called as self.extract_signature(...) at support.rs:93; same fan-out as symbol_kind across all 5 language implementations." },
+            { "name": "is_public", "note": "trait method, called as self.is_public(...) at support.rs:94; same fan-out as symbol_kind across all 5 language implementations." }
+          ]
+        }
+      },
+      "verification_note": "extract_symbols is LanguageSupport's default trait method (support.rs:50-99). It calls self.symbol_kind, self.extract_signature, and self.is_public through `self: &dyn LanguageSupport` (or the generic self in the trait default), each of which has 5 separate concrete definitions (one per registered language) with no single correct static target: the actual definition invoked depends on which language's Box<dyn LanguageSupport> is behind `self` at runtime, which is not recoverable from source text or a static call graph. This is true dynamic dispatch with no name-based resolution that can be correct in principle, ground truth marked dynamic_dispatch: no single verified_callees set exists; a static tool is scored on whether it honestly reports non-resolution (e.g. corbel's own 'unresolved'/'external' labels) rather than confidently asserting one wrong definition."
+    },
+    {
+      "id": "corbel-06",
+      "symbol": { "name": "hash_bytes", "file": "crates/corbel-core/src/hash.rs", "line": 48, "kind": "function" },
+      "category": "external_boundary",
+      "tasks": {
+        "callees": [
+          { "name": "xxh3_64", "external": true, "qualified_path_call": true, "note": "crates.io crate `xxhash-rust`, not part of this repository's source; called as xxhash_rust::xxh3::xxh3_64(data) at hash.rs:49." }
+        ]
+      },
+      "verification_note": "hash_bytes's only callee is a fully-qualified path call into the external xxhash-rust crate (xxhash_rust::xxh3::xxh3_64). `rg -n xxh3_64` finds no definition anywhere in this repository's source, confirming it resolves outside the indexed codebase. This entry is doubly instructive: xxh3_64 is genuinely external (so even a tool with perfect reference extraction could only report it as unresolved-to-this-index), but the deeper reason corbel's own extract_references produces zero relationship row here at all - not even one resolved to 'external' - is the same scoped_identifier call blind spot as corbel-04/hyperfine-03/hyperfine-04: `xxhash_rust::xxh3::xxh3_64(...)` is a scoped_identifier function call, which crates/corbel-lang/src/langs/rust.rs's REFERENCE_QUERY does not capture at all (only plain identifier and field_expression calls are captured), so the call site is invisible to indexing rather than merely unresolved."
+    }
+  ]
+}
