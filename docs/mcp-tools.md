@@ -21,7 +21,7 @@ calls it (callers) and everything it calls (callees).
 | `name`         | string | yes      | Symbol name to look up.            |
 | `file`         | string | no       | File to disambiguate the symbol.   |
 | `line`         | number | no       | Definition line to disambiguate further, for when `name` and `file` alone still match more than one symbol (e.g. overloaded declarations in the same file). Requires `file` to also be set. |
-| `token_budget` | number | no       | Cap on the size of the response, in estimated tokens, split evenly between callers and callees so a large caller list can't crowd out callees or vice versa. Defaults to corbel's built-in budget. |
+| `token_budget` | number | no       | Cap on the size of the response, in estimated tokens. Divided evenly across every matched symbol first (so an ambiguous `name` can't let one match consume the whole budget), then each match's share is split evenly between its callers and its callees so a large caller list can't crowd out callees or vice versa. Defaults to corbel's built-in budget. |
 
 | Response field | Description                                                    |
 | -------------- | ---------------------------------------------------------------- |

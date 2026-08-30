@@ -209,18 +209,20 @@ pub fn get_symbol(
     name: &str,
     file: Option<&str>,
     line: Option<u32>,
-    mut budget: TokenBudget,
+    budget: TokenBudget,
 ) -> Result<Vec<SymbolResult>> {
     let symbol_rows = find_symbol_rows(conn, name, file, line)?;
+
+    let row_count = symbol_rows.len().max(1);
+    let row_share = budget.remaining() / row_count;
 
     let mut results = Vec::with_capacity(symbol_rows.len());
     for symbol_row in symbol_rows {
         let callees = find_callees(conn, symbol_row.id)?;
         let callers = find_callers(conn, symbol_row.file_id, &symbol_row.info.name)?;
 
-        let remaining = budget.remaining();
-        let callers_share = remaining / 2;
-        let callees_share = remaining - callers_share;
+        let callers_share = row_share / 2;
+        let callees_share = row_share - callers_share;
         let mut callers_budget = TokenBudget::new(callers_share);
         let mut callees_budget = TokenBudget::new(callees_share);
 
@@ -228,11 +230,6 @@ pub fn get_symbol(
             budget_callers(callers, &mut callers_budget);
         let (callees, callees_truncated, callees_truncated_count) =
             budget_callees(callees, &mut callees_budget);
-
-        budget.try_consume(
-            (callers_share - callers_budget.remaining())
-                + (callees_share - callees_budget.remaining()),
-        );
 
         results.push(SymbolResult {
             symbol: symbol_row.info,

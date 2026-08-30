@@ -472,22 +472,83 @@ fn get_symbol_with_ample_budget_is_not_truncated() {
 }
 
 #[test]
-fn get_symbol_with_zero_budget_truncates_both_callers_and_callees() {
+fn get_symbol_with_zero_budget_truncates_both_nonempty_callers_and_callees() {
     let repo_dir = tempdir().unwrap();
     fs::write(repo_dir.path().join("a.rs"), b"pub fn a() {\n    b();\n}\n").unwrap();
     fs::write(repo_dir.path().join("b.rs"), b"pub fn b() {}\n").unwrap();
+    fs::write(
+        repo_dir.path().join("caller_of_a.rs"),
+        b"pub fn calls_a() {\n    a();\n}\n",
+    )
+    .unwrap();
 
     let root = RepoRoot::new(repo_dir.path()).unwrap();
     let (conn, _db_dir) = db();
     let parser = registry();
     index_repo(&root, &conn, &parser).unwrap();
 
+    let ample = get_symbol(&conn, "a", None, None, TokenBudget::new(AMPLE_BUDGET)).unwrap();
+    assert_eq!(
+        ample[0].callers.len(),
+        1,
+        "fixture must give a a real caller"
+    );
+    assert_eq!(
+        ample[0].callees.len(),
+        1,
+        "fixture must give a a real callee"
+    );
+
     let results = get_symbol(&conn, "a", None, None, TokenBudget::new(0)).unwrap();
     assert_eq!(results.len(), 1);
-    assert!(results[0].callers.is_empty());
-    assert!(results[0].callees.is_empty());
+    assert!(
+        results[0].callers.is_empty(),
+        "the one real caller must have been cut by the zero budget, not merely absent"
+    );
+    assert!(
+        results[0].callees.is_empty(),
+        "the one real callee must have been cut by the zero budget, not merely absent"
+    );
     assert!(results[0].truncated);
-    assert_eq!(results[0].truncated_count, 1);
+    assert_eq!(results[0].truncated_count, 2);
+}
+
+#[test]
+fn get_symbol_splits_budget_evenly_across_ambiguous_symbol_rows() {
+    let repo_dir = tempdir().unwrap();
+    for prefix in ["p", "q"] {
+        let mut src = String::from("pub fn shared() {}\n");
+        for i in 0..3 {
+            src.push_str(&format!(
+                "pub fn {prefix}_caller_{i}() {{\n    shared();\n}}\n"
+            ));
+        }
+        fs::write(repo_dir.path().join(format!("{prefix}.rs")), src).unwrap();
+    }
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let (conn, _db_dir) = db();
+    let parser = registry();
+    index_repo(&root, &conn, &parser).unwrap();
+
+    let ample = get_symbol(&conn, "shared", None, None, TokenBudget::new(AMPLE_BUDGET)).unwrap();
+    assert_eq!(ample.len(), 2, "fixture must produce two ambiguous rows");
+    assert_eq!(ample[0].callers.len(), 3);
+    assert_eq!(ample[1].callers.len(), 3);
+
+    let results = get_symbol(&conn, "shared", None, None, TokenBudget::new(160)).unwrap();
+    assert_eq!(results.len(), 2);
+
+    for (i, result) in results.iter().enumerate() {
+        assert!(
+            !result.callers.is_empty(),
+            "row {i} must not be starved to zero just because it was processed second"
+        );
+        assert!(
+            result.callers.len() < 3,
+            "row {i} should still be truncated given only a fraction of the total budget"
+        );
+    }
 }
 
 #[test]
