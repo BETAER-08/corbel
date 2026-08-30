@@ -55,6 +55,8 @@ cargo install corbel
 
 Pre-built binaries will be added here once releases start shipping.
 
+**Supported platforms**: Linux (x86_64, aarch64), macOS (x86_64, aarch64), and Windows (x86_64). Every platform runs the full test suite in CI; the rusqlite (bundled) and tree-sitter grammar dependencies build cleanly with MSVC.
+
 ## Usage
 
 ```
