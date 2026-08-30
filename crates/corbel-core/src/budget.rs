@@ -1,5 +1,6 @@
 pub const DEFAULT_IMPACT_TOKEN_BUDGET: usize = 8000;
 pub const DEFAULT_FIND_TOKEN_BUDGET: usize = 8000;
+pub const DEFAULT_GET_SYMBOL_TOKEN_BUDGET: usize = 8000;
 
 pub struct TokenBudget {
     limit: usize,
@@ -36,6 +37,13 @@ pub fn estimate_node_tokens(name: &str, file: &str, line: u32, resolution: &str)
     let json_like = format!(
         "{{\"name\":\"{name}\",\"file\":\"{file}\",\"line\":{line},\"resolution\":\"{resolution}\"}}"
     );
+    estimate_tokens(&json_like)
+}
+
+pub fn estimate_callee_tokens(name: &str, file: Option<&str>, resolution: &str) -> usize {
+    let file_text = file.unwrap_or("null");
+    let json_like =
+        format!("{{\"name\":\"{name}\",\"file\":\"{file_text}\",\"resolution\":\"{resolution}\"}}");
     estimate_tokens(&json_like)
 }
 
