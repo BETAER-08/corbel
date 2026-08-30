@@ -6,7 +6,10 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
 authors.workspace = true
+publish = true
 
 [features]
 default = ["lang-full"]
@@ -22,7 +25,7 @@ tree-sitter-python.workspace = true
 tree-sitter-typescript.workspace = true
 tree-sitter-javascript.workspace = true
 tracing.workspace = true
-corbel-core = { path = "../corbel-core" }
+corbel-core.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

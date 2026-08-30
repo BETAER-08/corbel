@@ -6,8 +6,11 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
 authors.workspace = true
-keywords = ["mcp", "code-context", "tree-sitter", "llm", "call-graph"]
+publish = true
+keywords = ["mcp", "call-graph", "static-analysis", "code-search", "llm"]
 categories = ["development-tools", "command-line-utilities"]
 
 [[bin]]
@@ -22,8 +25,8 @@ serde_json.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 rusqlite.workspace = true
-corbel-core = { path = "../corbel-core" }
-corbel-lang = { path = "../corbel-lang" }
+corbel-core.workspace = true
+corbel-lang.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true
