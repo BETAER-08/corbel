@@ -337,3 +337,155 @@ fn migrate_rejects_future_schema_version() {
 
     assert!(matches!(result, Err(Error::Migration { .. })));
 }
+
+fn create_v1_schema_db(db_path: &std::path::Path) {
+    let conn = rusqlite::Connection::open(db_path).unwrap();
+    conn.execute_batch(
+        "
+        CREATE TABLE files (
+            id INTEGER PRIMARY KEY,
+            path TEXT NOT NULL UNIQUE,
+            lang TEXT NOT NULL,
+            hash TEXT NOT NULL,
+            indexed_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE symbols (
+            id INTEGER PRIMARY KEY,
+            file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            line INTEGER NOT NULL,
+            signature TEXT,
+            is_public INTEGER NOT NULL
+        );
+
+        CREATE TABLE relationships (
+            id INTEGER PRIMARY KEY,
+            caller_symbol_id INTEGER NOT NULL REFERENCES symbols(id) ON DELETE CASCADE,
+            callee_name TEXT NOT NULL,
+            callee_file_id INTEGER REFERENCES files(id) ON DELETE SET NULL,
+            resolution TEXT NOT NULL CHECK (resolution IN ('same-file', 'scoped', 'global-unique', 'unresolved'))
+        );
+
+        CREATE TABLE imports (
+            id INTEGER PRIMARY KEY,
+            file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+            local_name TEXT NOT NULL,
+            source_path TEXT NOT NULL,
+            kind TEXT NOT NULL
+        );
+
+        CREATE TABLE embeddings (
+            symbol_id INTEGER PRIMARY KEY REFERENCES symbols(id) ON DELETE CASCADE,
+            vector BLOB NOT NULL
+        );
+
+        CREATE INDEX idx_symbols_name ON symbols(name);
+        CREATE INDEX idx_relationships_callee_file ON relationships(callee_file_id);
+        CREATE INDEX idx_symbols_file ON symbols(file_id);
+        CREATE INDEX idx_imports_file ON imports(file_id);
+
+        INSERT INTO files (id, path, lang, hash, indexed_at) VALUES (1, 'a.rs', 'rust', 'deadbeefcafebabe', 0);
+        INSERT INTO symbols (id, file_id, name, kind, line, signature, is_public) VALUES (1, 1, 'a', 'function', 1, NULL, 0);
+        INSERT INTO relationships (caller_symbol_id, callee_name, callee_file_id, resolution) VALUES (1, 'b', NULL, 'unresolved');
+        ",
+    )
+    .unwrap();
+    conn.pragma_update(None, "user_version", 1).unwrap();
+}
+
+#[test]
+fn open_for_serve_accepts_current_schema_version() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join("index.sqlite");
+    open_connection(&db_path).unwrap();
+
+    let conn = corbel_core::store::migrate::open_for_serve(&db_path).unwrap();
+
+    let user_version: i32 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(user_version, CURRENT_SCHEMA_VERSION);
+}
+
+#[test]
+fn open_for_serve_rejects_old_schema_version_without_modifying_file() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join("index.sqlite");
+    create_v1_schema_db(&db_path);
+
+    let bytes_before = std::fs::read(&db_path).unwrap();
+    let modified_before = std::fs::metadata(&db_path).unwrap().modified().unwrap();
+
+    let result = corbel_core::store::migrate::open_for_serve(&db_path);
+
+    let bytes_after = std::fs::read(&db_path).unwrap();
+    let modified_after = std::fs::metadata(&db_path).unwrap().modified().unwrap();
+
+    assert_eq!(bytes_before, bytes_after);
+    assert_eq!(modified_before, modified_after);
+    assert!(!dir.path().join("index.sqlite-wal").exists());
+    assert!(!dir.path().join("index.sqlite-shm").exists());
+
+    match result {
+        Err(Error::IncompatibleSchema {
+            expected,
+            condition: corbel_core::error::SchemaCondition::VersionMismatch(found),
+        }) => {
+            assert_eq!(expected, CURRENT_SCHEMA_VERSION as i64);
+            assert_eq!(found, 1);
+        }
+        other => panic!("expected IncompatibleSchema/VersionMismatch, got {other:?}"),
+    }
+}
+
+#[test]
+fn open_for_serve_rejects_non_database_file_as_unreadable() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join("index.sqlite");
+    std::fs::write(&db_path, b"this is not a sqlite database").unwrap();
+
+    let result = corbel_core::store::migrate::open_for_serve(&db_path);
+
+    match result {
+        Err(Error::IncompatibleSchema {
+            condition: corbel_core::error::SchemaCondition::Unreadable,
+            ..
+        }) => {}
+        other => panic!("expected IncompatibleSchema/Unreadable, got {other:?}"),
+    }
+}
+
+#[test]
+fn open_connection_rebuilds_non_database_file_from_scratch() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join("index.sqlite");
+    std::fs::write(&db_path, b"this is not a sqlite database").unwrap();
+
+    let conn = open_connection(&db_path).unwrap();
+
+    let user_version: i32 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(user_version, CURRENT_SCHEMA_VERSION);
+
+    let file_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM files", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(file_count, 0);
+}
+
+#[test]
+fn open_connection_rebuild_removes_stale_wal_and_shm_siblings() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join("index.sqlite");
+    std::fs::write(&db_path, b"not a database").unwrap();
+    std::fs::write(dir.path().join("index.sqlite-wal"), b"stale wal").unwrap();
+    std::fs::write(dir.path().join("index.sqlite-shm"), b"stale shm").unwrap();
+
+    open_connection(&db_path).unwrap();
+
+    let wal_contents = std::fs::read(dir.path().join("index.sqlite-wal"));
+    assert_ne!(wal_contents.unwrap_or_default(), b"stale wal");
+}

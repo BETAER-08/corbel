@@ -697,3 +697,78 @@ fn non_ascii_path_is_indexed_correctly() {
         .unwrap();
     assert_eq!(path, "café_한글.rs");
 }
+
+#[test]
+fn old_schema_version_forces_full_reindex_not_incremental() {
+    let repo_dir = tempdir().unwrap();
+    let file_content = b"pub fn a() {}\n";
+    fs::write(repo_dir.path().join("a.rs"), file_content).unwrap();
+
+    let db_dir = tempdir().unwrap();
+    let db_path = db_dir.path().join("index.db");
+    let real_hash = corbel_core::hash::hash_bytes(file_content).to_string();
+
+    let raw = rusqlite::Connection::open(&db_path).unwrap();
+    raw.execute_batch(&format!(
+        "
+        CREATE TABLE files (
+            id INTEGER PRIMARY KEY,
+            path TEXT NOT NULL UNIQUE,
+            lang TEXT NOT NULL,
+            hash TEXT NOT NULL,
+            indexed_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE symbols (
+            id INTEGER PRIMARY KEY,
+            file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            line INTEGER NOT NULL,
+            signature TEXT,
+            is_public INTEGER NOT NULL
+        );
+
+        CREATE TABLE relationships (
+            id INTEGER PRIMARY KEY,
+            caller_symbol_id INTEGER NOT NULL REFERENCES symbols(id) ON DELETE CASCADE,
+            callee_name TEXT NOT NULL,
+            callee_file_id INTEGER REFERENCES files(id) ON DELETE SET NULL,
+            resolution TEXT NOT NULL CHECK (resolution IN ('same-file', 'scoped', 'global-unique', 'external', 'unresolved'))
+        );
+
+        CREATE TABLE imports (
+            id INTEGER PRIMARY KEY,
+            file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+            local_name TEXT,
+            source_path TEXT NOT NULL,
+            kind TEXT NOT NULL
+        );
+
+        CREATE TABLE embeddings (
+            symbol_id INTEGER PRIMARY KEY REFERENCES symbols(id) ON DELETE CASCADE,
+            vector BLOB NOT NULL
+        );
+
+        CREATE INDEX idx_symbols_name ON symbols(name);
+        CREATE INDEX idx_relationships_callee_file ON relationships(callee_file_id);
+        CREATE INDEX idx_symbols_file ON symbols(file_id);
+        CREATE INDEX idx_imports_file ON imports(file_id);
+
+        INSERT INTO files (id, path, lang, hash, indexed_at) VALUES (1, 'a.rs', 'rust', '{real_hash}', 0);
+        "
+    ))
+    .unwrap();
+    raw.pragma_update(None, "user_version", 2).unwrap();
+    drop(raw);
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let conn = open_connection(&db_path).unwrap();
+    let parser = registry();
+
+    let stats = index_repo(&root, &conn, &parser).unwrap();
+
+    assert_eq!(stats.files_indexed, 1);
+    assert_eq!(stats.files_skipped_unchanged, 0);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM symbols"), 1);
+}

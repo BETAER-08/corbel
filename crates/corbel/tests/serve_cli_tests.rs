@@ -442,3 +442,118 @@ fn verbose_serve_keeps_stdout_pure_json_rpc_only() {
     let stderr = String::from_utf8(output.stderr.clone()).unwrap();
     assert!(!stderr.is_empty());
 }
+
+fn write_v1_schema_index(repo_dir: &std::path::Path) {
+    let corbel_dir = repo_dir.join(".corbel");
+    fs::create_dir_all(&corbel_dir).unwrap();
+    let db_path = corbel_dir.join("index.db");
+    let conn = rusqlite::Connection::open(&db_path).unwrap();
+    conn.execute_batch(
+        "
+        CREATE TABLE files (
+            id INTEGER PRIMARY KEY,
+            path TEXT NOT NULL UNIQUE,
+            lang TEXT NOT NULL,
+            hash TEXT NOT NULL,
+            indexed_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE symbols (
+            id INTEGER PRIMARY KEY,
+            file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            line INTEGER NOT NULL,
+            signature TEXT,
+            is_public INTEGER NOT NULL
+        );
+
+        CREATE TABLE relationships (
+            id INTEGER PRIMARY KEY,
+            caller_symbol_id INTEGER NOT NULL REFERENCES symbols(id) ON DELETE CASCADE,
+            callee_name TEXT NOT NULL,
+            callee_file_id INTEGER REFERENCES files(id) ON DELETE SET NULL,
+            resolution TEXT NOT NULL CHECK (resolution IN ('same-file', 'scoped', 'global-unique', 'unresolved'))
+        );
+
+        CREATE TABLE imports (
+            id INTEGER PRIMARY KEY,
+            file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+            local_name TEXT NOT NULL,
+            source_path TEXT NOT NULL,
+            kind TEXT NOT NULL
+        );
+
+        CREATE TABLE embeddings (
+            symbol_id INTEGER PRIMARY KEY REFERENCES symbols(id) ON DELETE CASCADE,
+            vector BLOB NOT NULL
+        );
+
+        CREATE INDEX idx_symbols_name ON symbols(name);
+        CREATE INDEX idx_relationships_callee_file ON relationships(callee_file_id);
+        CREATE INDEX idx_symbols_file ON symbols(file_id);
+        CREATE INDEX idx_imports_file ON imports(file_id);
+        ",
+    )
+    .unwrap();
+    conn.pragma_update(None, "user_version", 1).unwrap();
+}
+
+#[test]
+fn serve_rejects_old_schema_version_without_migrating_and_advises_reindex() {
+    let repo_dir = tempdir().unwrap();
+    fs::write(repo_dir.path().join("a.rs"), b"pub fn a() {}\n").unwrap();
+    write_v1_schema_index(repo_dir.path());
+
+    let db_path = repo_dir.path().join(".corbel").join("index.db");
+    let bytes_before = fs::read(&db_path).unwrap();
+
+    corbel_cmd()
+        .arg("serve")
+        .arg(repo_dir.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("schema version"))
+        .stderr(predicate::str::contains("corbel index"));
+
+    let bytes_after = fs::read(&db_path).unwrap();
+    assert_eq!(bytes_before, bytes_after);
+
+    let conn = rusqlite::Connection::open(&db_path).unwrap();
+    let user_version: i32 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(user_version, 1);
+}
+
+#[test]
+fn serve_rejects_corrupted_index_with_distinct_message() {
+    let repo_dir = tempdir().unwrap();
+    fs::write(repo_dir.path().join("a.rs"), b"pub fn a() {}\n").unwrap();
+    let corbel_dir = repo_dir.path().join(".corbel");
+    fs::create_dir_all(&corbel_dir).unwrap();
+    fs::write(corbel_dir.join("index.db"), b"not a sqlite database at all").unwrap();
+
+    corbel_cmd()
+        .arg("serve")
+        .arg(repo_dir.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "could not be read as a corbel index",
+        ))
+        .stderr(predicate::str::contains("corbel index"))
+        .stderr(predicate::str::contains("schema version").not());
+}
+
+#[test]
+fn serve_starts_normally_against_current_schema_version() {
+    let repo_dir = indexed_repo();
+
+    corbel_cmd()
+        .arg("serve")
+        .arg(repo_dir.path())
+        .write_stdin(format!("{}\n", initialize_request("2024-11-05")))
+        .assert()
+        .success();
+}
