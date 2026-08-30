@@ -469,6 +469,10 @@ mod tests {
         let text = parsed["result"]["content"][0]["text"].as_str().unwrap();
         let payload: Value = serde_json::from_str(text).unwrap();
         assert_eq!(payload["truncated"], true);
+        assert_eq!(payload["found"], true);
+        assert_eq!(payload["count"], 0);
+        assert_eq!(payload["total_matches"], 1);
+        assert!(payload["results"].as_array().unwrap().is_empty());
     }
 
     #[test]

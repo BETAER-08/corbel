@@ -257,16 +257,32 @@ fn impact_payload(name: &str, results: &[ImpactResult]) -> Value {
 }
 
 fn find_payload(query: &str, result: &FindResult) -> Value {
-    if result.matches.is_empty() {
+    if result.total_matches == 0 {
         return json!({
             "query": query,
             "found": false,
+            "count": 0,
+            "total_matches": 0,
+            "truncated": result.truncated,
+            "truncated_count": result.truncated_count,
+            "results": [],
+            "message": format!("no symbol matching \"{query}\" found in the index"),
+        });
+    }
+
+    if result.matches.is_empty() {
+        return json!({
+            "query": query,
+            "found": true,
             "count": 0,
             "total_matches": result.total_matches,
             "truncated": result.truncated,
             "truncated_count": result.truncated_count,
             "results": [],
-            "message": format!("no symbol matching \"{query}\" found in the index"),
+            "message": format!(
+                "{} symbol(s) matched \"{query}\" but none fit within the token budget; increase token_budget to see them",
+                result.total_matches
+            ),
         });
     }
 

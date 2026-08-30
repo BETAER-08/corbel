@@ -1,8 +1,10 @@
 # MCP tools
 
-corbel exposes three tools over MCP. Every response includes a `resolution`
-field describing how references were resolved and a `truncated` field
-indicating whether the response was cut to fit the output budget.
+corbel exposes three tools over MCP. Every `get_symbol` and `impact` response
+includes a `resolution` field describing how references were resolved and a
+`truncated` field indicating whether the response was cut to fit the output
+budget. `find` is a name search, not a call-graph query, and its response
+shape is documented separately below.
 
 ## Transport rules
 
@@ -16,7 +18,7 @@ Return the definition and metadata for a single symbol.
 | Input   | Type   | Required | Description                        |
 | ------- | ------ | -------- | ---------------------------------- |
 | `name`  | string | yes      | Symbol name to look up.            |
-| `path`  | string | no       | File to disambiguate the symbol.   |
+| `file`  | string | no       | File to disambiguate the symbol.   |
 | `line`  | number | no       | Definition line to disambiguate further, for when `name` and `file` alone still match more than one symbol (e.g. overloaded declarations in the same file). Requires `file` to also be set. |
 
 | Response field | Description                                  |
@@ -44,6 +46,13 @@ must match that identifier's actual case.
 over the `symbols` table, not a call-graph query. Use `get_symbol` or
 `impact` on a specific match for that.
 
+**Known limitation:** the query's `%query%` pattern (leading wildcard, for
+substring matching) cannot use the `idx_symbols_name` index — both the
+`COUNT(*)` and the main `SELECT` fall back to a full scan of the `symbols`
+table on every call. This is fine at the scale corbel is built for today, but
+on a very large repository's index it will be the slowest of the three
+tools. Not fixed as part of this change.
+
 | Input          | Type   | Required | Description                                             |
 | -------------- | ------ | -------- | -------------------------------------------------------- |
 | `query`        | string | yes      | Substring to search for in symbol names.                 |
@@ -52,10 +61,14 @@ over the `symbols` table, not a call-graph query. Use `get_symbol` or
 
 | Response field   | Description                                                    |
 | ---------------- | ---------------------------------------------------------------- |
+| `query`          | The substring that was searched for.                             |
+| `found`          | Whether `total_matches` is greater than zero. Note this can be `true` even when `results` is empty: if every match was cut by the token budget, `found` still reflects that matches exist, and `message` explains why none are shown (see below). |
+| `count`          | Number of matches actually included in `results` (`0` when the token budget was too small to include any). |
 | `results`        | Matching symbols (`name`, `file`, `line`, `kind`, `signature`, `is_public`). |
 | `total_matches`  | How many symbols in the index matched the query, before `limit` or the token budget were applied. |
 | `truncated`      | Whether `results` is fewer than `total_matches`.                 |
 | `truncated_count`| How many matches were left out of `results`.                     |
+| `message`        | Present only when `results` is empty. Reads "no symbol matching ... found in the index" when `total_matches` is `0`, or "N symbol(s) matched ... but none fit within the token budget" when matches exist but the budget excluded all of them. |
 
 ## impact
 
@@ -64,7 +77,7 @@ Return the symbols affected by a change to a given symbol.
 | Input    | Type   | Required | Description                       |
 | -------- | ------ | -------- | --------------------------------- |
 | `name`   | string | yes      | Symbol to analyze.                |
-| `path`   | string | no       | File to disambiguate the symbol.  |
+| `file`   | string | no       | File to disambiguate the symbol.  |
 
 | Response field | Description                                  |
 | -------------- | -------------------------------------------- |
