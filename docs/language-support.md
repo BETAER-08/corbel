@@ -2,14 +2,29 @@
 
 ## Status
 
-Rust, Python, TypeScript, TSX — implemented and verified.
-JavaScript — not yet implemented (`langs/javascript.rs` is an empty stub).
+| Language   | Level | Notes |
+| ---------- | ----- | ----- |
+| Rust       | full  | `langs/rust.rs` — own `symbol_query`/`reference_query`, `use`-tree scope walker, all five resolution stages exercised. |
+| Python     | full  | `langs/python.rs` — own `symbol_query`/`reference_query`, `import`/`from ... import` scope walker, all five resolution stages exercised. |
+| TypeScript | full  | `langs/typescript.rs` — own `symbol_query`/`reference_query`, ES-module scope walker, all five resolution stages exercised. |
+| TSX        | full  | `langs/tsx.rs` — reuses TypeScript's `symbol_kind`/`extract_signature`/`build_scope`/`enclosing_definition_name`, overrides `extract_references` to add JSX-tag references. |
+| JavaScript | full  | `langs/javascript.rs` — reuses TypeScript's `symbol_kind`/`extract_signature`/`build_scope`/`enclosing_definition_name`, overrides `extract_references` to add JSX-tag references, same as TSX. Known gap: `build_scope` only walks `import_statement`/`export_statement`, so CommonJS `require(...)` calls produce no import entry (verified by `commonjs_require_does_not_produce_an_import_entry` in `tests/javascript_tests.rs`); this doesn't lower the tier because the same ES-module-only scope walker is shared verbatim with TypeScript/TSX. |
 
-`LanguageSupport` is frozen based on four languages clearing it end to end.
-JavaScript is the fifth and last language on the current roadmap; it is
-expected to confirm the contract rather than change it, since it shares a
-grammar family with TypeScript/TSX. The trait will only be reopened if
-JavaScript turns up a requirement the other four didn't.
+The five-stage resolution chain (same-file, scoped, global-unique, external,
+unresolved) is implemented once in `corbel-core/src/resolve.rs`
+(`resolve_all`) and is language-agnostic: it reads only the generic
+`symbols`/`imports`/`relationships` tables and never branches on source
+language, so all five stages apply identically to every registered
+language above.
+
+`LanguageSupport` is frozen based on five languages clearing it end to end.
+JavaScript confirmed the contract rather than changing it, since it shares a
+grammar family with TypeScript/TSX: it reuses `typescript::build_scope`,
+`typescript::symbol_kind`, `typescript::extract_signature`, and
+`typescript::enclosing_definition_name` verbatim, and defines its own
+`reference_query`/`extract_references` override to add JSX-tag references —
+the same override TSX uses. The trait was not reopened; JavaScript turned up
+no requirement the other four didn't already cover.
 
 ## The `LanguageSupport` contract
 
@@ -41,14 +56,14 @@ These have no default body. Each language must answer for itself:
   this for free because it only combines results the required methods
   already computed.
 - `extract_references` — runs `reference_query`, then calls
-  `enclosing_definition_name` on each `@callee` capture. TSX overrides this
-  one: its query captures two disjoint groups (`@callee` for ordinary
-  calls, `@jsx_callee` for JSX tags), and the default only knows about
-  `@callee`. Overriding to dispatch on capture name isn't a language
+  `enclosing_definition_name` on each `@callee` capture. TSX and JavaScript
+  override this one: their query captures two disjoint groups (`@callee` for
+  ordinary calls, `@jsx_callee` for JSX tags), and the default only knows
+  about `@callee`. Overriding to dispatch on capture name isn't a language
   fabricating data — it still gets every fact from the same required
   methods — so it stays within the policy.
 
-## What four languages confirmed
+## What five languages confirmed
 
 - **`is_public` covers three different visibility models without changing
   shape.** Rust reads a `pub` keyword. Python reads a leading-underscore
@@ -75,11 +90,11 @@ These have no default body. Each language must answer for itself:
   language gets there (query, recursion, hybrid) is invisible to every
   caller.
 
-- **`ImportKind` covers all four languages' import forms with no new
+- **`ImportKind` covers all five languages' import forms with no new
   variant.** `Direct { aliased }`, `Reexport { aliased }`, `Wildcard`,
   `Namespace`, `SideEffect` were designed against Rust/Python/TypeScript
-  and held unchanged through TSX, which reuses TypeScript's `build_scope`
-  verbatim. The one enum distinction that mattered in practice:
+  and held unchanged through TSX and JavaScript, both of which reuse
+  TypeScript's `build_scope` verbatim. The one enum distinction that mattered in practice:
   `import * as ns` binds a concrete name and is `Namespace`, while
   `export * from "m"` / `from m import *` / `use a::*` bind no name and are
   all `Wildcard` — collapsing that distinction was the bug the enum was
