@@ -95,6 +95,33 @@ def classify_extra(entry, extra_key, ground_truth_raw=None, task_name=None):
     return "other_spurious_match"
 
 
+def _corbel_meta(task_result):
+    tools = task_result.get("tools")
+    if tools and "corbel" in tools:
+        return tools["corbel"].get("meta", {})
+    tool_answers = task_result.get("tool_answers")
+    if tool_answers and "corbel" in tool_answers:
+        return tool_answers["corbel"].get("meta", {})
+    return {}
+
+
+def collect_truncated_cases(repo_name, task_results):
+    cases = []
+    for task_result in task_results:
+        meta = _corbel_meta(task_result)
+        if meta.get("truncated"):
+            cases.append(
+                {
+                    "repo": repo_name,
+                    "entry_id": task_result["entry_id"],
+                    "symbol": task_result["symbol"]["name"],
+                    "task": task_result["task"],
+                    "truncated_count": meta.get("truncated_count", 0),
+                }
+            )
+    return cases
+
+
 def _in_scope(file_rel, search_root):
     if search_root in (".", ""):
         return True
@@ -288,6 +315,8 @@ def run_repo(golden_set, corbel_binary):
     finally:
         corbel_client.close()
 
+    truncated_cases = collect_truncated_cases(golden_set["repo"], task_results)
+
     return {
         "repo": golden_set["repo"],
         "language": language,
@@ -299,7 +328,9 @@ def run_repo(golden_set, corbel_binary):
         "corbel_index_seconds": index_time,
         "corbel_index_summary": index_stdout,
         "ctags_build_seconds": ctags_build_time,
+        "benchmark_token_budget": ta.BENCHMARK_TOKEN_BUDGET,
         "task_results": task_results,
+        "truncated_cases": truncated_cases,
     }
 
 
@@ -332,11 +363,18 @@ def main():
         print(f"running benchmark for {golden_set['repo']}...", file=sys.stderr)
         repo_results.append(run_repo(golden_set, corbel_binary))
 
+    all_truncated_cases = [
+        case for repo_result in repo_results for case in repo_result["truncated_cases"]
+    ]
+
     run_report = {
         "started_at": started_at,
         "finished_at": datetime.now(timezone.utc).isoformat(),
         "tool_versions": tool_versions,
+        "benchmark_token_budget": ta.BENCHMARK_TOKEN_BUDGET,
+        "benchmark_token_budget_rationale": ta.BENCHMARK_TOKEN_BUDGET_RATIONALE,
         "repos": repo_results,
+        "truncated_cases": all_truncated_cases,
     }
 
     results_dir = Path(args.results_dir)
@@ -358,6 +396,22 @@ def main():
 
     print(f"wrote {json_path}", file=sys.stderr)
     print(f"wrote {md_path}", file=sys.stderr)
+
+    if all_truncated_cases:
+        print("", file=sys.stderr)
+        print(
+            f"WARNING: corbel's response was truncated in {len(all_truncated_cases)} "
+            f"case(s) despite BENCHMARK_TOKEN_BUDGET={ta.BENCHMARK_TOKEN_BUDGET}. "
+            "Precision/recall numbers for these cases may be affected. See "
+            "truncated_cases in the JSON report:",
+            file=sys.stderr,
+        )
+        for case in all_truncated_cases:
+            print(
+                f"  - {case['repo']}/{case['entry_id']} ({case['symbol']}, "
+                f"{case['task']}): {case['truncated_count']} entries cut",
+                file=sys.stderr,
+            )
 
 
 if __name__ == "__main__":

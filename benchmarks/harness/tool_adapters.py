@@ -7,6 +7,20 @@ from pathlib import Path
 
 from enclosing import all_definitions, enclosing_definition
 
+BENCHMARK_TOKEN_BUDGET = 1_000_000
+BENCHMARK_TOKEN_BUDGET_RATIONALE = (
+    "corbel's get_symbol splits its token_budget first across every matched "
+    "symbol row, then splits each row's share evenly between callers and "
+    "callees, so any nonzero-but-realistic budget can silently drop entries "
+    "for a symbol with a large caller or callee list before precision/recall "
+    "is ever computed. Accuracy runs must never be affected by this: "
+    "1,000,000 is three orders of magnitude above the largest caller count "
+    "in this benchmark's golden sets (itsdangerous-01 want_bytes, 19 "
+    "callers, each estimated at roughly 20-30 tokens by corbel's own "
+    "estimate_node_tokens), while still being a finite, explicit value "
+    "rather than an unbounded one."
+)
+
 RUST_KEYWORDS = {
     "if", "while", "for", "match", "return", "fn", "let", "async", "await",
     "impl", "struct", "enum", "trait", "pub", "mod", "use", "where", "loop",
@@ -413,12 +427,14 @@ class CorbelClient:
         text = resp["result"]["content"][0]["text"]
         return json.loads(text)
 
-    def get_symbol(self, name, file=None, line=None):
+    def get_symbol(self, name, file=None, line=None, token_budget=None):
         args = {"name": name}
         if file is not None:
             args["file"] = file
         if line is not None:
             args["line"] = line
+        if token_budget is not None:
+            args["token_budget"] = token_budget
         return self.call_tool("get_symbol", args)
 
 
@@ -430,34 +446,46 @@ def corbel_index(binary_path, repo_root):
     return elapsed, proc.stdout
 
 
-def corbel_find_callers(client, name, def_file, def_line):
+def corbel_find_callers(client, name, def_file, def_line, token_budget=BENCHMARK_TOKEN_BUDGET):
     start = time.perf_counter()
-    payload = client.get_symbol(name, file=def_file, line=def_line)
+    payload = client.get_symbol(
+        name, file=def_file, line=def_line, token_budget=token_budget
+    )
     elapsed = time.perf_counter() - start
     if not payload.get("found") or not payload.get("results"):
-        return [], elapsed, {"payload": payload}
+        return [], elapsed, {"payload": payload, "truncated": False, "truncated_count": 0}
     result = payload["results"][0]
     callers = [
         {"file": c["file"], "line": c["line"], "enclosing_symbol": c["name"], "resolution": c["resolution"]}
         for c in result.get("callers", [])
     ]
-    return callers, elapsed, {"raw_caller_count": len(result.get("callers", []))}
+    return callers, elapsed, {
+        "raw_caller_count": len(result.get("callers", [])),
+        "truncated": bool(result.get("truncated", False)),
+        "truncated_count": result.get("truncated_count", 0),
+    }
 
 
-def corbel_find_callees(client, name, def_file, def_line):
+def corbel_find_callees(client, name, def_file, def_line, token_budget=BENCHMARK_TOKEN_BUDGET):
     start = time.perf_counter()
-    payload = client.get_symbol(name, file=def_file, line=def_line)
+    payload = client.get_symbol(
+        name, file=def_file, line=def_line, token_budget=token_budget
+    )
     elapsed = time.perf_counter() - start
     if not payload.get("found") or not payload.get("results"):
-        return [], elapsed, {"payload": payload}
+        return [], elapsed, {"payload": payload, "truncated": False, "truncated_count": 0}
     result = payload["results"][0]
     callees = [c["name"] for c in result.get("callees", [])]
-    return callees, elapsed, {"raw": result.get("callees", [])}
+    return callees, elapsed, {
+        "raw": result.get("callees", []),
+        "truncated": bool(result.get("truncated", False)),
+        "truncated_count": result.get("truncated_count", 0),
+    }
 
 
 def corbel_find_definition(client, name):
     start = time.perf_counter()
-    payload = client.get_symbol(name)
+    payload = client.get_symbol(name, token_budget=BENCHMARK_TOKEN_BUDGET)
     elapsed = time.perf_counter() - start
     if not payload.get("found"):
         return [], elapsed, {"payload": payload}

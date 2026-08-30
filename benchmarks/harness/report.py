@@ -62,6 +62,18 @@ def render_markdown(run_report):
     lines = []
     lines.append("# corbel vs grep / ripgrep / ctags benchmark")
     lines.append("")
+
+    all_truncated_cases = run_report.get("truncated_cases", [])
+    if all_truncated_cases:
+        lines.append(
+            f"**WARNING: corbel's response was truncated in {len(all_truncated_cases)} "
+            f"case(s) despite a {run_report.get('benchmark_token_budget')}-token budget. "
+            "Precision/recall for the affected entries may be understated — see "
+            "\"Truncated cases\" in each repository section below before trusting "
+            "any recall number in this report.**"
+        )
+        lines.append("")
+
     lines.append(f"Run started: {run_report['started_at']}")
     lines.append(f"Run finished: {run_report['finished_at']}")
     lines.append("")
@@ -72,6 +84,16 @@ def render_markdown(run_report):
     for name, version in run_report["tool_versions"].items():
         lines.append(f"| {name} | {version if version else 'n/a'} |")
     lines.append("")
+    lines.append(
+        f"Accuracy runs use `BENCHMARK_TOKEN_BUDGET = "
+        f"{run_report.get('benchmark_token_budget')}` for every corbel `get_symbol` "
+        "call, not corbel's own built-in default, so truncation cannot silently "
+        "depress recall."
+    )
+    lines.append("")
+    if run_report.get("benchmark_token_budget_rationale"):
+        lines.append(f"Rationale: {run_report['benchmark_token_budget_rationale']}")
+        lines.append("")
 
     for repo in run_report["repos"]:
         lines.append(f"## Repository: {repo['repo']} ({repo['language']})")
@@ -85,6 +107,32 @@ def render_markdown(run_report):
         lines.append(f"- corbel index time: {_fmt(repo['corbel_index_seconds'])}s")
         lines.append(f"- ctags build time: {_fmt(repo['ctags_build_seconds'])}s")
         lines.append("")
+
+        lines.append("### Truncated cases")
+        lines.append("")
+        repo_truncated = repo.get("truncated_cases", [])
+        if not repo_truncated:
+            lines.append(
+                f"None. Every corbel call in this repository fit within the "
+                f"{run_report.get('benchmark_token_budget')}-token accuracy budget; "
+                "no precision/recall number below was affected by truncation."
+            )
+            lines.append("")
+        else:
+            lines.append(
+                "**These cases were cut by the token budget, not genuinely "
+                "unresolved by corbel. This is not a correctness failure — it is "
+                "reported separately from the failure-cause table below.**"
+            )
+            lines.append("")
+            lines.append("| Entry | Symbol | Task | Entries cut |")
+            lines.append("| --- | --- | --- | --- |")
+            for case in repo_truncated:
+                lines.append(
+                    f"| {case['entry_id']} | {case['symbol']} | {case['task']} | "
+                    f"{case['truncated_count']} |"
+                )
+            lines.append("")
 
         summary = _aggregate_per_tool(repo["task_results"])
         lines.append("### Aggregate precision / recall / F1 / time (non-ambiguous tasks only)")
