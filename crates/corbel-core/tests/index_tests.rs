@@ -520,3 +520,180 @@ fn typescript_repository_indexes_and_resolves_through_the_same_pipeline() {
     assert_eq!(stats.resolution.same_file, 1);
     assert_eq!(stats.resolution.scoped, 1);
 }
+
+#[test]
+fn binary_file_with_recognized_extension_is_skipped_not_indexed() {
+    let repo_dir = tempdir().unwrap();
+    fs::write(repo_dir.path().join("good.rs"), b"pub fn good() {}\n").unwrap();
+    fs::write(
+        repo_dir.path().join("binary.rs"),
+        [0xff_u8, 0xfe, 0x00, 0x01, 0x02, 0xff, 0xff, 0xfe],
+    )
+    .unwrap();
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let (conn, _db_dir) = db();
+    let parser = registry();
+
+    let stats = index_repo(&root, &conn, &parser).unwrap();
+
+    assert_eq!(stats.files_indexed, 1);
+    assert_eq!(stats.skipped.len(), 1);
+    assert_eq!(stats.skipped[0].path.as_deref(), Some("binary.rs"));
+    assert_eq!(
+        stats.skipped[0].reason,
+        corbel_core::walk::SkipReason::NotUtf8
+    );
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM files"), 1);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM symbols"), 1);
+}
+
+#[test]
+fn oversized_file_is_skipped_and_not_read_as_content() {
+    let repo_dir = tempdir().unwrap();
+    fs::write(repo_dir.path().join("small.rs"), b"pub fn small() {}\n").unwrap();
+    let huge = vec![b'a'; (corbel_core::index::MAX_INDEXABLE_FILE_SIZE_BYTES + 1) as usize];
+    fs::write(repo_dir.path().join("huge.rs"), &huge).unwrap();
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let (conn, _db_dir) = db();
+    let parser = registry();
+
+    let stats = index_repo(&root, &conn, &parser).unwrap();
+
+    assert_eq!(stats.files_indexed, 1);
+    assert_eq!(stats.skipped.len(), 1);
+    assert_eq!(stats.skipped[0].path.as_deref(), Some("huge.rs"));
+    match &stats.skipped[0].reason {
+        corbel_core::walk::SkipReason::TooLarge { size, limit } => {
+            assert_eq!(*size, huge.len() as u64);
+            assert_eq!(*limit, corbel_core::index::MAX_INDEXABLE_FILE_SIZE_BYTES);
+        }
+        other => panic!("expected TooLarge, got {other:?}"),
+    }
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM files"), 1);
+}
+
+#[test]
+fn utf8_bom_is_stripped_before_parsing() {
+    let repo_dir = tempdir().unwrap();
+    let mut content = vec![0xEF, 0xBB, 0xBF];
+    content.extend_from_slice(b"pub fn with_bom() {}\n");
+    fs::write(repo_dir.path().join("a.rs"), &content).unwrap();
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let (conn, _db_dir) = db();
+    let parser = registry();
+
+    let stats = index_repo(&root, &conn, &parser).unwrap();
+
+    assert_eq!(stats.files_indexed, 1);
+    assert!(stats.skipped.is_empty());
+
+    let (name, line): (String, i64) = conn
+        .query_row(
+            "SELECT name, line FROM symbols WHERE name = 'with_bom'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(name, "with_bom");
+    assert_eq!(line, 1);
+}
+
+#[test]
+fn skipped_file_does_not_abort_indexing_of_other_files() {
+    let repo_dir = tempdir().unwrap();
+    fs::write(repo_dir.path().join("before.rs"), b"pub fn before() {}\n").unwrap();
+    fs::write(repo_dir.path().join("bad.rs"), [0xff_u8, 0xfe, 0x00]).unwrap();
+    fs::write(repo_dir.path().join("after.rs"), b"pub fn after() {}\n").unwrap();
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let (conn, _db_dir) = db();
+    let parser = registry();
+
+    let stats = index_repo(&root, &conn, &parser).unwrap();
+
+    assert_eq!(stats.files_indexed, 2);
+    assert_eq!(stats.skipped.len(), 1);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM symbols"), 2);
+}
+
+#[cfg(unix)]
+#[test]
+fn unreadable_file_is_skipped_and_does_not_abort_indexing() {
+    use std::fs::Permissions;
+    use std::os::unix::fs::PermissionsExt;
+
+    let repo_dir = tempdir().unwrap();
+    fs::write(repo_dir.path().join("readable.rs"), b"pub fn ok() {}\n").unwrap();
+    let locked_path = repo_dir.path().join("locked.rs");
+    fs::write(&locked_path, b"pub fn locked() {}\n").unwrap();
+    fs::set_permissions(&locked_path, Permissions::from_mode(0o000)).unwrap();
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let (conn, _db_dir) = db();
+    let parser = registry();
+
+    let stats = index_repo(&root, &conn, &parser);
+
+    fs::set_permissions(&locked_path, Permissions::from_mode(0o644)).unwrap();
+
+    let stats = stats.unwrap();
+    assert_eq!(stats.files_indexed, 1);
+    assert_eq!(stats.skipped.len(), 1);
+    assert_eq!(stats.skipped[0].path.as_deref(), Some("locked.rs"));
+    assert!(matches!(
+        stats.skipped[0].reason,
+        corbel_core::walk::SkipReason::Io(_)
+    ));
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM symbols"), 1);
+}
+
+#[test]
+fn empty_repository_indexes_without_error() {
+    let repo_dir = tempdir().unwrap();
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let (conn, _db_dir) = db();
+    let parser = registry();
+
+    let stats = index_repo(&root, &conn, &parser).unwrap();
+
+    assert_eq!(stats.files_indexed, 0);
+    assert!(stats.skipped.is_empty());
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM files"), 0);
+}
+
+#[test]
+fn repository_without_git_directory_indexes_normally() {
+    let repo_dir = tempdir().unwrap();
+    fs::write(repo_dir.path().join("a.rs"), b"pub fn a() {}\n").unwrap();
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let (conn, _db_dir) = db();
+    let parser = registry();
+
+    let stats = index_repo(&root, &conn, &parser).unwrap();
+
+    assert_eq!(stats.files_indexed, 1);
+    assert!(stats.skipped.is_empty());
+}
+
+#[test]
+fn non_ascii_path_is_indexed_correctly() {
+    let repo_dir = tempdir().unwrap();
+    fs::write(repo_dir.path().join("café_한글.rs"), b"pub fn a() {}\n").unwrap();
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let (conn, _db_dir) = db();
+    let parser = registry();
+
+    let stats = index_repo(&root, &conn, &parser).unwrap();
+
+    assert_eq!(stats.files_indexed, 1);
+    let path: String = conn
+        .query_row("SELECT path FROM files", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(path, "café_한글.rs");
+}

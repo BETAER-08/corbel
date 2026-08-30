@@ -166,3 +166,144 @@ fn verbose_flag_keeps_stdout_summary_and_adds_stderr_logs() {
         .stdout(predicate::str::contains("Internal calls:"))
         .stderr(predicate::str::is_empty().not());
 }
+
+#[test]
+fn binary_file_is_skipped_and_summarized() {
+    let repo_dir = tempdir().unwrap();
+    fs::write(repo_dir.path().join("good.rs"), b"fn good() {}\n").unwrap();
+    fs::write(
+        repo_dir.path().join("bad.rs"),
+        [0xff_u8, 0xfe, 0x00, 0x01, 0xff, 0xff],
+    )
+    .unwrap();
+
+    corbel_cmd()
+        .arg("index")
+        .arg(repo_dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Indexed 1 files (0 unchanged)"))
+        .stdout(predicate::str::contains("Skipped 1 file(s):"))
+        .stdout(predicate::str::contains("not valid UTF-8"));
+}
+
+#[test]
+fn oversized_file_is_skipped_and_summarized() {
+    let repo_dir = tempdir().unwrap();
+    fs::write(repo_dir.path().join("small.rs"), b"fn small() {}\n").unwrap();
+    let huge = vec![b'a'; 6 * 1024 * 1024];
+    fs::write(repo_dir.path().join("huge.rs"), &huge).unwrap();
+
+    corbel_cmd()
+        .arg("index")
+        .arg(repo_dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Indexed 1 files (0 unchanged)"))
+        .stdout(predicate::str::contains("Skipped 1 file(s):"))
+        .stdout(predicate::str::contains("too large"));
+}
+
+#[test]
+fn bom_prefixed_file_is_indexed_without_being_skipped() {
+    let repo_dir = tempdir().unwrap();
+    let mut content = vec![0xEF, 0xBB, 0xBF];
+    content.extend_from_slice(b"fn with_bom() {}\n");
+    fs::write(repo_dir.path().join("a.rs"), &content).unwrap();
+
+    corbel_cmd()
+        .arg("index")
+        .arg(repo_dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Indexed 1 files (0 unchanged)"))
+        .stdout(predicate::str::contains("1 symbols"))
+        .stdout(predicate::str::contains("Skipped").not());
+}
+
+#[test]
+fn no_skip_line_when_nothing_was_skipped() {
+    let repo_dir = tempdir().unwrap();
+    fs::write(repo_dir.path().join("a.rs"), b"fn a() {}\n").unwrap();
+
+    corbel_cmd()
+        .arg("index")
+        .arg(repo_dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Skipped").not());
+}
+
+#[test]
+fn verbose_flag_reports_skipped_file_path_and_reason_on_stderr() {
+    let repo_dir = tempdir().unwrap();
+    fs::write(repo_dir.path().join("bad.rs"), [0xff_u8, 0xfe, 0x00, 0x01]).unwrap();
+
+    corbel_cmd()
+        .arg("-v")
+        .arg("index")
+        .arg(repo_dir.path())
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("bad.rs"))
+        .stderr(predicate::str::contains("not valid UTF-8"));
+}
+
+#[cfg(unix)]
+#[test]
+fn unreadable_file_is_skipped_summarized_and_does_not_fail_the_command() {
+    use std::fs::Permissions;
+    use std::os::unix::fs::PermissionsExt;
+
+    let repo_dir = tempdir().unwrap();
+    fs::write(repo_dir.path().join("readable.rs"), b"fn ok() {}\n").unwrap();
+    let locked_path = repo_dir.path().join("locked.rs");
+    fs::write(&locked_path, b"fn locked() {}\n").unwrap();
+    fs::set_permissions(&locked_path, Permissions::from_mode(0o000)).unwrap();
+
+    corbel_cmd()
+        .arg("index")
+        .arg(repo_dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Indexed 1 files (0 unchanged)"))
+        .stdout(predicate::str::contains("Skipped 1 file(s):"))
+        .stdout(predicate::str::contains("I/O error"));
+
+    fs::set_permissions(&locked_path, Permissions::from_mode(0o644)).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn symlinked_file_is_skipped_and_summarized() {
+    use std::os::unix::fs::symlink;
+
+    let repo_dir = tempdir().unwrap();
+    fs::write(repo_dir.path().join("real.rs"), b"fn real() {}\n").unwrap();
+    symlink(
+        repo_dir.path().join("real.rs"),
+        repo_dir.path().join("link.rs"),
+    )
+    .unwrap();
+
+    corbel_cmd()
+        .arg("index")
+        .arg(repo_dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Indexed 1 files (0 unchanged)"))
+        .stdout(predicate::str::contains("Skipped 1 file(s):"))
+        .stdout(predicate::str::contains("symlink"));
+}
+
+#[test]
+fn empty_repository_indexes_successfully() {
+    let repo_dir = tempdir().unwrap();
+
+    corbel_cmd()
+        .arg("index")
+        .arg(repo_dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Indexed 0 files (0 unchanged)"));
+}

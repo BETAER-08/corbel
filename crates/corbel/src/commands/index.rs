@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
@@ -31,8 +32,16 @@ pub fn run(path: &Path, verbose: bool) -> anyhow::Result<()> {
             imports_stored = stats.imports_stored,
             relationships_stored = stats.relationships_stored,
             references_skipped_no_caller = stats.references_skipped_no_caller,
+            files_skipped_error = stats.skipped.len(),
             "indexing complete"
         );
+        for skipped in &stats.skipped {
+            tracing::debug!(
+                path = skipped.path.as_deref().unwrap_or("<unknown>"),
+                reason = %skipped.reason,
+                "skipped file"
+            );
+        }
     }
 
     let total_symbols: i64 =
@@ -80,5 +89,19 @@ fn print_summary(stats: &IndexStats, total_symbols: i64, total_relationships: i6
             "Note: {} internal call(s) could not be resolved because multiple definitions share the same name.",
             resolution.unresolved
         );
+    }
+
+    if !stats.skipped.is_empty() {
+        println!();
+        println!("Skipped {} file(s):", stats.skipped.len());
+        let mut counts: BTreeMap<&'static str, usize> = BTreeMap::new();
+        for skipped in &stats.skipped {
+            *counts.entry(skipped.reason.category()).or_default() += 1;
+        }
+        let breakdown: Vec<String> = counts
+            .into_iter()
+            .map(|(category, count)| format!("{count} {category}"))
+            .collect();
+        println!("  {}", breakdown.join(", "));
     }
 }

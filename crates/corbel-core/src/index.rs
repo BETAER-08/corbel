@@ -4,12 +4,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::hash::hash_bytes;
 use crate::path::RepoRoot;
 use crate::resolve::{ResolutionStats, resolve_all};
 use crate::symbol::FileParser;
-use crate::walk::{WalkConfig, walk_repo};
+use crate::walk::{SkipReason, SkippedFile, WalkConfig, walk_repo};
+
+pub const MAX_INDEXABLE_FILE_SIZE_BYTES: u64 = 5 * 1024 * 1024;
+pub const MAX_INDEXABLE_FILE_SIZE_RATIONALE: &str = "Hand-written and reasonably-sized generated source rarely exceeds a few hundred KB. Files beyond 5 MB are almost always vendored bundles, minified assets, or generated data tables with little symbol-navigation value, and fully reading and parsing them has an outsized cost relative to that value.";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct IndexStats {
@@ -20,6 +23,7 @@ pub struct IndexStats {
     pub relationships_stored: usize,
     pub references_skipped_no_caller: usize,
     pub resolution: ResolutionStats,
+    pub skipped: Vec<SkippedFile>,
 }
 
 pub fn index_repo(
@@ -35,14 +39,35 @@ pub fn index_repo(
 
     let tx = conn.unchecked_transaction()?;
     let mut stats = IndexStats::default();
+    stats.skipped.extend(walked.skipped);
     let mut seen_paths: HashSet<String> = HashSet::new();
 
-    for file in &walked {
+    for file in &walked.files {
         let path_str = file.path.as_ref();
         seen_paths.insert(path_str.to_string());
 
+        if file.size > MAX_INDEXABLE_FILE_SIZE_BYTES {
+            stats.skipped.push(SkippedFile {
+                path: Some(path_str.to_string()),
+                reason: SkipReason::TooLarge {
+                    size: file.size,
+                    limit: MAX_INDEXABLE_FILE_SIZE_BYTES,
+                },
+            });
+            continue;
+        }
+
         let abs_path = root.as_path().join(path_str);
-        let content = fs::read(&abs_path).map_err(|e| Error::io(&abs_path, e))?;
+        let content = match fs::read(&abs_path) {
+            Ok(content) => content,
+            Err(err) => {
+                stats.skipped.push(SkippedFile {
+                    path: Some(path_str.to_string()),
+                    reason: SkipReason::Io(err.to_string()),
+                });
+                continue;
+            }
+        };
         let hash_str = hash_bytes(&content).to_string();
 
         let existing_hash: Option<String> = tx
@@ -59,7 +84,19 @@ pub fn index_repo(
             continue;
         }
 
-        let source = String::from_utf8_lossy(&content).into_owned();
+        let mut source = match String::from_utf8(content) {
+            Ok(source) => source,
+            Err(_) => {
+                stats.skipped.push(SkippedFile {
+                    path: Some(path_str.to_string()),
+                    reason: SkipReason::NotUtf8,
+                });
+                continue;
+            }
+        };
+        if source.starts_with('\u{FEFF}') {
+            source.replace_range(0..3, "");
+        }
         let indexed_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time is after unix epoch")
