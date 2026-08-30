@@ -13,19 +13,63 @@ written to `stderr`.
 
 ## get_symbol
 
-Return the definition and metadata for a single symbol.
+Return the definition and metadata for a single symbol, plus everything that
+calls it (callers) and everything it calls (callees).
 
-| Input   | Type   | Required | Description                        |
-| ------- | ------ | -------- | ---------------------------------- |
-| `name`  | string | yes      | Symbol name to look up.            |
-| `file`  | string | no       | File to disambiguate the symbol.   |
-| `line`  | number | no       | Definition line to disambiguate further, for when `name` and `file` alone still match more than one symbol (e.g. overloaded declarations in the same file). Requires `file` to also be set. |
+| Input          | Type   | Required | Description                        |
+| -------------- | ------ | -------- | ---------------------------------- |
+| `name`         | string | yes      | Symbol name to look up.            |
+| `file`         | string | no       | File to disambiguate the symbol.   |
+| `line`         | number | no       | Definition line to disambiguate further, for when `name` and `file` alone still match more than one symbol (e.g. overloaded declarations in the same file). Requires `file` to also be set. |
+| `token_budget` | number | no       | Cap on the size of the response, in estimated tokens, split evenly between callers and callees so a large caller list can't crowd out callees or vice versa. Defaults to corbel's built-in budget. |
 
-| Response field | Description                                  |
-| -------------- | -------------------------------------------- |
-| `symbol`       | The matched symbol record.                   |
-| `resolution`   | How the symbol was resolved.                 |
-| `truncated`    | Whether the response was truncated.          |
+| Response field | Description                                                    |
+| -------------- | ---------------------------------------------------------------- |
+| `query`        | The symbol name that was looked up.                               |
+| `found`        | Whether `name` (as narrowed by `file`/`line`) matched any symbol. |
+| `count`        | Number of matched symbols in `results` (`name` alone can match more than one, e.g. overloaded declarations in different files). |
+| `results`      | Matched symbols, each described below.                            |
+| `message`      | Present only when `found` is `false`: "no symbol named ... found in the index". |
+
+Each entry in `results` is:
+
+| Field             | Description                                                  |
+| ----------------- | -------------------------------------------------------------- |
+| `name`, `file`, `line`, `kind`, `signature`, `is_public` | The symbol's own definition metadata. |
+| `callers`         | Symbols that call this one. Each entry has `name`, `file`, `line` (the caller's own definition line, not the call site), and `resolution` (how corbel resolved that reference, e.g. same-file, scoped, global-unique). |
+| `callees`         | Symbols this one calls. Each entry has `name`, `file` (`null` if unresolved or external), and `resolution`. |
+| `truncated`       | Whether `callers` and/or `callees` were cut to fit the token budget for this result. |
+| `truncated_count` | How many caller and callee entries together were left out.   |
+
+## impact
+
+Return the symbols affected by a change to a given symbol: the reverse call
+graph, walked across multiple hops.
+
+| Input          | Type   | Required | Description                       |
+| -------------- | ------ | -------- | --------------------------------- |
+| `name`         | string | yes      | Symbol to analyze.                |
+| `file`         | string | no       | File to disambiguate the symbol.  |
+| `token_budget` | number | no       | Cap on the size of the response, in estimated tokens. Defaults to corbel's built-in budget. |
+
+| Response field | Description                                                    |
+| -------------- | ---------------------------------------------------------------- |
+| `query`        | The symbol name the impact analysis started from.                 |
+| `found`        | Whether `name` (as narrowed by `file`) matched any symbol.        |
+| `count`        | Number of matched symbols in `results` (usually `1` unless `name` is ambiguous without `file`). |
+| `results`      | One impact analysis per matched symbol, each described below.     |
+| `message`      | Present only when `found` is `false`: "no symbol named ... found in the index". |
+
+Each entry in `results` is:
+
+| Field               | Description                                                  |
+| ------------------- | -------------------------------------------------------------- |
+| `target_name`, `target_file`, `target_line` | The symbol the analysis started from.       |
+| `affected`           | Every symbol reachable by walking callers outward from the target. Each entry has `name`, `file`, `line`, `resolution`, and `depth` (how many hops away it is). |
+| `affected_count`     | Number of entries in `affected`.                              |
+| `max_depth_reached`  | The largest `depth` value present in `affected`.               |
+| `truncated`          | Whether `affected` was cut to fit the token budget.            |
+| `truncated_count`    | How many further affected symbols were left out.               |
 
 ## find
 
@@ -56,7 +100,7 @@ tools. Not fixed as part of this change.
 | Input          | Type   | Required | Description                                             |
 | -------------- | ------ | -------- | -------------------------------------------------------- |
 | `query`        | string | yes      | Substring to search for in symbol names.                 |
-| `limit`        | number | no       | Maximum number of matches to return. Defaults to corbel's built-in limit. |
+| `limit`        | number | no       | Maximum number of matches to return, from `0` up to corbel's hard maximum of 200. Requests above 200 are rejected with an error rather than silently reduced. Defaults to corbel's built-in limit. |
 | `token_budget` | number | no       | Cap on the size of the response, in estimated tokens. Defaults to corbel's built-in budget. |
 
 | Response field   | Description                                                    |
@@ -69,18 +113,3 @@ tools. Not fixed as part of this change.
 | `truncated`      | Whether `results` is fewer than `total_matches`.                 |
 | `truncated_count`| How many matches were left out of `results`.                     |
 | `message`        | Present only when `results` is empty. Reads "no symbol matching ... found in the index" when `total_matches` is `0`, or "N symbol(s) matched ... but none fit within the token budget" when matches exist but the budget excluded all of them. |
-
-## impact
-
-Return the symbols affected by a change to a given symbol.
-
-| Input    | Type   | Required | Description                       |
-| -------- | ------ | -------- | --------------------------------- |
-| `name`   | string | yes      | Symbol to analyze.                |
-| `file`   | string | no       | File to disambiguate the symbol.  |
-
-| Response field | Description                                  |
-| -------------- | -------------------------------------------- |
-| `callers`      | Symbols that depend on the target.           |
-| `resolution`   | How the callers were resolved.               |
-| `truncated`    | Whether the response was truncated.          |

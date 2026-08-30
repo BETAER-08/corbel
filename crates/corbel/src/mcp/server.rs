@@ -269,6 +269,29 @@ mod tests {
             payload["results"][0]["callers"][0]["resolution"],
             "global-unique"
         );
+        assert_eq!(payload["results"][0]["truncated"], false);
+        assert_eq!(payload["results"][0]["truncated_count"], 0);
+    }
+
+    #[test]
+    fn get_symbol_call_with_tiny_budget_is_truncated() {
+        let conn = indexed_conn();
+        let response = handle_line(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_symbol","arguments":{"name":"b","token_budget":1}}}"#,
+            &conn,
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&response).unwrap();
+        let text = parsed["result"]["content"][0]["text"].as_str().unwrap();
+        let payload: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(payload["results"][0]["truncated"], true);
+        assert!(payload["results"][0]["truncated_count"].as_u64().unwrap() > 0);
+        assert!(
+            payload["results"][0]["callers"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -473,6 +496,9 @@ mod tests {
         assert_eq!(payload["count"], 0);
         assert_eq!(payload["total_matches"], 1);
         assert!(payload["results"].as_array().unwrap().is_empty());
+        let message = payload["message"].as_str().unwrap();
+        assert!(message.contains('1'));
+        assert!(message.contains("token_budget"));
     }
 
     #[test]
@@ -500,6 +526,35 @@ mod tests {
         .unwrap();
         let parsed: Value = serde_json::from_str(&response).unwrap();
         assert_eq!(parsed["error"]["code"], -32602);
+    }
+
+    #[test]
+    fn find_call_limit_above_maximum_is_invalid_params() {
+        let conn = indexed_conn();
+        let response = handle_line(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"find","arguments":{"query":"a","limit":500}}}"#,
+            &conn,
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(parsed["error"]["code"], -32602);
+    }
+
+    #[test]
+    fn find_call_with_zero_limit_returns_no_results_without_error() {
+        let conn = indexed_conn();
+        let response = handle_line(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"find","arguments":{"query":"a","limit":0}}}"#,
+            &conn,
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&response).unwrap();
+        let text = parsed["result"]["content"][0]["text"].as_str().unwrap();
+        let payload: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(payload["found"], true);
+        assert_eq!(payload["count"], 0);
+        assert_eq!(payload["total_matches"], 1);
+        assert!(payload["results"].as_array().unwrap().is_empty());
     }
 
     #[test]

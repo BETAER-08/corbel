@@ -35,7 +35,7 @@ fn call_chain_populates_callers_and_callees() {
     let parser = registry();
     index_repo(&root, &conn, &parser).unwrap();
 
-    let results = get_symbol(&conn, "b", None, None).unwrap();
+    let results = get_symbol(&conn, "b", None, None, TokenBudget::new(AMPLE_BUDGET)).unwrap();
     assert_eq!(results.len(), 1);
     let result = &results[0];
 
@@ -64,7 +64,14 @@ fn unknown_symbol_returns_empty_vector() {
     let parser = registry();
     index_repo(&root, &conn, &parser).unwrap();
 
-    let results = get_symbol(&conn, "does_not_exist", None, None).unwrap();
+    let results = get_symbol(
+        &conn,
+        "does_not_exist",
+        None,
+        None,
+        TokenBudget::new(AMPLE_BUDGET),
+    )
+    .unwrap();
     assert!(results.is_empty());
 }
 
@@ -87,12 +94,19 @@ fn duplicate_name_across_files_yields_two_results_narrowed_by_file() {
     let parser = registry();
     index_repo(&root, &conn, &parser).unwrap();
 
-    let results = get_symbol(&conn, "shared", None, None).unwrap();
+    let results = get_symbol(&conn, "shared", None, None, TokenBudget::new(AMPLE_BUDGET)).unwrap();
     assert_eq!(results.len(), 2);
     assert_eq!(results[0].symbol.file, "p.rs");
     assert_eq!(results[1].symbol.file, "q.rs");
 
-    let narrowed = get_symbol(&conn, "shared", Some("q.rs"), None).unwrap();
+    let narrowed = get_symbol(
+        &conn,
+        "shared",
+        Some("q.rs"),
+        None,
+        TokenBudget::new(AMPLE_BUDGET),
+    )
+    .unwrap();
     assert_eq!(narrowed.len(), 1);
     assert_eq!(narrowed[0].symbol.file, "q.rs");
 }
@@ -116,7 +130,7 @@ fn caller_is_attributed_only_to_the_definition_in_the_same_file() {
     let parser = registry();
     index_repo(&root, &conn, &parser).unwrap();
 
-    let results = get_symbol(&conn, "shared", None, None).unwrap();
+    let results = get_symbol(&conn, "shared", None, None, TokenBudget::new(AMPLE_BUDGET)).unwrap();
     let p_result = results.iter().find(|r| r.symbol.file == "p.rs").unwrap();
     let q_result = results.iter().find(|r| r.symbol.file == "q.rs").unwrap();
 
@@ -145,7 +159,7 @@ fn external_call_has_no_file_and_external_resolution() {
     let parser = registry();
     index_repo(&root, &conn, &parser).unwrap();
 
-    let results = get_symbol(&conn, "a", None, None).unwrap();
+    let results = get_symbol(&conn, "a", None, None, TokenBudget::new(AMPLE_BUDGET)).unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].callees.len(), 1);
     assert_eq!(results[0].callees[0].name, "nonexistent_external");
@@ -169,7 +183,14 @@ fn ambiguous_call_from_third_file_is_unresolved() {
     let parser = registry();
     index_repo(&root, &conn, &parser).unwrap();
 
-    let results = get_symbol(&conn, "ambiguous_caller", None, None).unwrap();
+    let results = get_symbol(
+        &conn,
+        "ambiguous_caller",
+        None,
+        None,
+        TokenBudget::new(AMPLE_BUDGET),
+    )
+    .unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].callees.len(), 1);
     assert_eq!(results[0].callees[0].name, "dup");
@@ -191,7 +212,7 @@ fn symbol_info_matches_definition() {
     let parser = registry();
     index_repo(&root, &conn, &parser).unwrap();
 
-    let results = get_symbol(&conn, "a", None, None).unwrap();
+    let results = get_symbol(&conn, "a", None, None, TokenBudget::new(AMPLE_BUDGET)).unwrap();
     assert_eq!(results.len(), 1);
     let symbol = &results[0].symbol;
 
@@ -215,8 +236,8 @@ fn repeated_queries_return_identical_order() {
     let parser = registry();
     index_repo(&root, &conn, &parser).unwrap();
 
-    let first = get_symbol(&conn, "b", None, None).unwrap();
-    let second = get_symbol(&conn, "b", None, None).unwrap();
+    let first = get_symbol(&conn, "b", None, None, TokenBudget::new(AMPLE_BUDGET)).unwrap();
+    let second = get_symbol(&conn, "b", None, None, TokenBudget::new(AMPLE_BUDGET)).unwrap();
     assert_eq!(first, second);
 }
 
@@ -234,10 +255,24 @@ fn duplicate_name_within_same_file_is_narrowed_by_line() {
     let parser = registry();
     index_repo(&root, &conn, &parser).unwrap();
 
-    let both = get_symbol(&conn, "widget", Some("overload.rs"), None).unwrap();
+    let both = get_symbol(
+        &conn,
+        "widget",
+        Some("overload.rs"),
+        None,
+        TokenBudget::new(AMPLE_BUDGET),
+    )
+    .unwrap();
     assert_eq!(both.len(), 2);
 
-    let narrowed = get_symbol(&conn, "widget", Some("overload.rs"), Some(5)).unwrap();
+    let narrowed = get_symbol(
+        &conn,
+        "widget",
+        Some("overload.rs"),
+        Some(5),
+        TokenBudget::new(AMPLE_BUDGET),
+    )
+    .unwrap();
     assert_eq!(narrowed.len(), 1);
     assert_eq!(narrowed[0].symbol.line, 5);
     assert_eq!(
@@ -417,4 +452,79 @@ fn find_works_across_all_five_registered_languages() {
             "widget_tsx",
         ]
     );
+}
+
+#[test]
+fn get_symbol_with_ample_budget_is_not_truncated() {
+    let repo_dir = tempdir().unwrap();
+    fs::write(repo_dir.path().join("a.rs"), b"pub fn a() {\n    b();\n}\n").unwrap();
+    fs::write(repo_dir.path().join("b.rs"), b"pub fn b() {}\n").unwrap();
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let (conn, _db_dir) = db();
+    let parser = registry();
+    index_repo(&root, &conn, &parser).unwrap();
+
+    let results = get_symbol(&conn, "a", None, None, TokenBudget::new(AMPLE_BUDGET)).unwrap();
+    assert_eq!(results.len(), 1);
+    assert!(!results[0].truncated);
+    assert_eq!(results[0].truncated_count, 0);
+}
+
+#[test]
+fn get_symbol_with_zero_budget_truncates_both_callers_and_callees() {
+    let repo_dir = tempdir().unwrap();
+    fs::write(repo_dir.path().join("a.rs"), b"pub fn a() {\n    b();\n}\n").unwrap();
+    fs::write(repo_dir.path().join("b.rs"), b"pub fn b() {}\n").unwrap();
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let (conn, _db_dir) = db();
+    let parser = registry();
+    index_repo(&root, &conn, &parser).unwrap();
+
+    let results = get_symbol(&conn, "a", None, None, TokenBudget::new(0)).unwrap();
+    assert_eq!(results.len(), 1);
+    assert!(results[0].callers.is_empty());
+    assert!(results[0].callees.is_empty());
+    assert!(results[0].truncated);
+    assert_eq!(results[0].truncated_count, 1);
+}
+
+#[test]
+fn get_symbol_splits_budget_so_many_callers_do_not_starve_callees() {
+    let repo_dir = tempdir().unwrap();
+    fs::write(
+        repo_dir.path().join("hot.rs"),
+        b"pub fn hot() {\n    helper();\n}\n",
+    )
+    .unwrap();
+    fs::write(repo_dir.path().join("helper.rs"), b"pub fn helper() {}\n").unwrap();
+    for i in 0..5 {
+        fs::write(
+            repo_dir.path().join(format!("caller_{i}.rs")),
+            format!("pub fn caller_{i}() {{\n    hot();\n}}\n").as_bytes(),
+        )
+        .unwrap();
+    }
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let (conn, _db_dir) = db();
+    let parser = registry();
+    index_repo(&root, &conn, &parser).unwrap();
+
+    let results = get_symbol(&conn, "hot", None, None, TokenBudget::new(100)).unwrap();
+    assert_eq!(results.len(), 1);
+    let result = &results[0];
+
+    assert!(
+        result.callers.len() < 5,
+        "expected the tiny budget to truncate at least one of the 5 callers"
+    );
+    assert_eq!(
+        result.callees.len(),
+        1,
+        "the single callee must not be starved by the much larger callers list"
+    );
+    assert!(result.truncated);
+    assert!(result.truncated_count > 0);
 }

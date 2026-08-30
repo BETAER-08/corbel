@@ -1,10 +1,13 @@
 use rusqlite::Connection;
 use serde_json::{Value, json};
 
-use corbel_core::budget::{DEFAULT_FIND_TOKEN_BUDGET, DEFAULT_IMPACT_TOKEN_BUDGET, TokenBudget};
+use corbel_core::budget::{
+    DEFAULT_FIND_TOKEN_BUDGET, DEFAULT_GET_SYMBOL_TOKEN_BUDGET, DEFAULT_IMPACT_TOKEN_BUDGET,
+    TokenBudget,
+};
 use corbel_core::query::{
     self, CalleeInfo, CallerInfo, DEFAULT_FIND_LIMIT, FindMatch, FindResult, ImpactResult,
-    SymbolResult,
+    MAX_FIND_LIMIT, SymbolResult,
 };
 
 pub enum ToolCallError {
@@ -16,7 +19,7 @@ pub fn list_tools() -> Vec<Value> {
     vec![
         json!({
             "name": "get_symbol",
-            "description": "Look up a single symbol by name in the local corbel index and return where it is defined (file, line, signature), everything that calls it (callers), and everything it calls (callees). Every caller and callee comes with a `resolution` field showing exactly how corbel resolved that reference to a specific definition (e.g. same-file, scoped, global-unique) rather than a guess from text matching — this is what makes the result trustworthy for navigation and refactoring, unlike a grep/text search which can't tell you if a match is actually the same symbol. Use this tool when you need to jump to a function's or type's definition, inspect its signature, or see who calls it and what it calls, before editing it. If `name` (optionally narrowed by `file`) still matches more than one symbol — e.g. overloaded declarations in the same file — pass `line` as well; the `find` tool's results already carry the exact `name`/`file`/`line` triple needed to pin down one match. The index is built ahead of time by `corbel index` and only reflects the state of the repository as of the last index run.",
+            "description": "Look up a single symbol by name in the local corbel index and return where it is defined (file, line, signature), everything that calls it (callers), and everything it calls (callees). Every caller and callee comes with a `resolution` field showing exactly how corbel resolved that reference to a specific definition (e.g. same-file, scoped, global-unique) rather than a guess from text matching — this is what makes the result trustworthy for navigation and refactoring, unlike a grep/text search which can't tell you if a match is actually the same symbol. Use this tool when you need to jump to a function's or type's definition, inspect its signature, or see who calls it and what it calls, before editing it. If `name` (optionally narrowed by `file`) still matches more than one symbol — e.g. overloaded declarations in the same file — pass `line` as well; the `find` tool's results already carry the exact `name`/`file`/`line` triple needed to pin down one match. The response can be truncated to fit within a token budget; when it is, `truncated` is set to true and `truncated_count` reports how many additional callers and callees together were left out (the budget is split evenly between callers and callees so a hot function's huge caller list can't crowd out its callees, or vice versa). The index is built ahead of time by `corbel index` and only reflects the state of the repository as of the last index run.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -31,6 +34,10 @@ pub fn list_tools() -> Vec<Value> {
                     "line": {
                         "type": "number",
                         "description": "Optional definition line to disambiguate further, for when `name` and `file` alone still match more than one symbol (e.g. overloaded declarations in the same file). Requires `file` to also be set."
+                    },
+                    "token_budget": {
+                        "type": "number",
+                        "description": "Optional cap on the size of the response, in estimated tokens, split evenly between callers and callees. Defaults to corbel's built-in budget if omitted."
                     }
                 },
                 "required": ["name"]
@@ -70,7 +77,7 @@ pub fn list_tools() -> Vec<Value> {
                     },
                     "limit": {
                         "type": "number",
-                        "description": "Optional cap on the number of matches returned. Defaults to corbel's built-in limit if omitted."
+                        "description": "Optional cap on the number of matches returned, from 0 up to corbel's hard maximum of 200 (requests above 200 are rejected, not silently reduced). Defaults to corbel's built-in limit if omitted."
                     },
                     "token_budget": {
                         "type": "number",
@@ -133,10 +140,13 @@ fn optional_limit(arguments: &Value) -> Result<usize, ToolCallError> {
     match arguments.get("limit") {
         None | Some(Value::Null) => Ok(DEFAULT_FIND_LIMIT),
         Some(value) => match value.as_u64() {
-            Some(0) | None => Err(ToolCallError::InvalidParams(
-                "argument \"limit\" must be a positive number".to_string(),
+            Some(limit) if limit > MAX_FIND_LIMIT as u64 => Err(ToolCallError::InvalidParams(
+                format!("argument \"limit\" must not exceed {MAX_FIND_LIMIT}"),
             )),
             Some(limit) => Ok(limit as usize),
+            None => Err(ToolCallError::InvalidParams(
+                "argument \"limit\" must be a non-negative number".to_string(),
+            )),
         },
     }
 }
@@ -203,6 +213,8 @@ fn get_symbol_payload(name: &str, results: &[SymbolResult]) -> Value {
                 "is_public": result.symbol.is_public,
                 "callers": result.callers.iter().map(caller_json).collect::<Vec<_>>(),
                 "callees": result.callees.iter().map(callee_json).collect::<Vec<_>>(),
+                "truncated": result.truncated,
+                "truncated_count": result.truncated_count,
             })
         })
         .collect();
@@ -301,6 +313,7 @@ pub fn call_get_symbol(conn: &Connection, arguments: &Value) -> Result<Value, To
     let name = required_string(arguments, "name")?;
     let file = optional_string(arguments, "file")?;
     let line = optional_line(arguments)?;
+    let token_budget = optional_token_budget(arguments, DEFAULT_GET_SYMBOL_TOKEN_BUDGET)?;
 
     if line.is_some() && file.is_none() {
         return Err(ToolCallError::InvalidParams(
@@ -308,8 +321,14 @@ pub fn call_get_symbol(conn: &Connection, arguments: &Value) -> Result<Value, To
         ));
     }
 
-    let results = query::get_symbol(conn, &name, file.as_deref(), line)
-        .map_err(|err| ToolCallError::Internal(err.to_string()))?;
+    let results = query::get_symbol(
+        conn,
+        &name,
+        file.as_deref(),
+        line,
+        TokenBudget::new(token_budget),
+    )
+    .map_err(|err| ToolCallError::Internal(err.to_string()))?;
 
     Ok(tool_text_response(get_symbol_payload(&name, &results)))
 }

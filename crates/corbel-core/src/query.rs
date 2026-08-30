@@ -2,7 +2,9 @@ use std::collections::{HashSet, VecDeque};
 
 use rusqlite::{Connection, params};
 
-use crate::budget::{TokenBudget, estimate_node_tokens, estimate_symbol_tokens};
+use crate::budget::{
+    TokenBudget, estimate_callee_tokens, estimate_node_tokens, estimate_symbol_tokens,
+};
 use crate::error::Result;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,6 +37,8 @@ pub struct SymbolResult {
     pub symbol: SymbolInfo,
     pub callers: Vec<CallerInfo>,
     pub callees: Vec<CalleeInfo>,
+    pub truncated: bool,
+    pub truncated_count: usize,
 }
 
 struct SymbolRow {
@@ -160,11 +164,52 @@ fn find_callers(conn: &Connection, file_id: i64, name: &str) -> Result<Vec<Calle
         .collect())
 }
 
+fn budget_callers(
+    callers: Vec<CallerInfo>,
+    budget: &mut TokenBudget,
+) -> (Vec<CallerInfo>, bool, usize) {
+    let mut kept = Vec::with_capacity(callers.len());
+    let mut truncated = false;
+    let mut truncated_count = 0;
+    for caller in callers {
+        let estimate =
+            estimate_node_tokens(&caller.name, &caller.file, caller.line, &caller.resolution);
+        if budget.try_consume(estimate) {
+            kept.push(caller);
+        } else {
+            truncated = true;
+            truncated_count += 1;
+        }
+    }
+    (kept, truncated, truncated_count)
+}
+
+fn budget_callees(
+    callees: Vec<CalleeInfo>,
+    budget: &mut TokenBudget,
+) -> (Vec<CalleeInfo>, bool, usize) {
+    let mut kept = Vec::with_capacity(callees.len());
+    let mut truncated = false;
+    let mut truncated_count = 0;
+    for callee in callees {
+        let estimate =
+            estimate_callee_tokens(&callee.name, callee.file.as_deref(), &callee.resolution);
+        if budget.try_consume(estimate) {
+            kept.push(callee);
+        } else {
+            truncated = true;
+            truncated_count += 1;
+        }
+    }
+    (kept, truncated, truncated_count)
+}
+
 pub fn get_symbol(
     conn: &Connection,
     name: &str,
     file: Option<&str>,
     line: Option<u32>,
+    mut budget: TokenBudget,
 ) -> Result<Vec<SymbolResult>> {
     let symbol_rows = find_symbol_rows(conn, name, file, line)?;
 
@@ -173,10 +218,28 @@ pub fn get_symbol(
         let callees = find_callees(conn, symbol_row.id)?;
         let callers = find_callers(conn, symbol_row.file_id, &symbol_row.info.name)?;
 
+        let remaining = budget.remaining();
+        let callers_share = remaining / 2;
+        let callees_share = remaining - callers_share;
+        let mut callers_budget = TokenBudget::new(callers_share);
+        let mut callees_budget = TokenBudget::new(callees_share);
+
+        let (callers, callers_truncated, callers_truncated_count) =
+            budget_callers(callers, &mut callers_budget);
+        let (callees, callees_truncated, callees_truncated_count) =
+            budget_callees(callees, &mut callees_budget);
+
+        budget.try_consume(
+            (callers_share - callers_budget.remaining())
+                + (callees_share - callees_budget.remaining()),
+        );
+
         results.push(SymbolResult {
             symbol: symbol_row.info,
             callers,
             callees,
+            truncated: callers_truncated || callees_truncated,
+            truncated_count: callers_truncated_count + callees_truncated_count,
         });
     }
 

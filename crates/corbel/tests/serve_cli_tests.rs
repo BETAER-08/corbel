@@ -180,6 +180,7 @@ fn tools_list_declares_get_symbol_impact_and_find_with_required_fields() {
     );
     assert!(get_symbol["inputSchema"]["properties"]["file"].is_object());
     assert!(get_symbol["inputSchema"]["properties"]["line"].is_object());
+    assert!(get_symbol["inputSchema"]["properties"]["token_budget"].is_object());
 
     let impact = tools.iter().find(|t| t["name"] == "impact").unwrap();
     assert!(
@@ -236,6 +237,8 @@ fn get_symbol_call_returns_definition_callers_and_callees() {
     assert!(result["callers"][0]["resolution"].is_string());
     assert_eq!(result["callees"][0]["name"], "c");
     assert!(result["callees"][0]["resolution"].is_string());
+    assert_eq!(result["truncated"], false);
+    assert_eq!(result["truncated_count"], 0);
 }
 
 #[test]
