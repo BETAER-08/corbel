@@ -3,7 +3,7 @@ use std::io::{BufRead, Write};
 use rusqlite::Connection;
 use serde_json::{Value, json};
 
-use crate::mcp::tools::{ToolCallError, call_get_symbol, call_impact, list_tools};
+use crate::mcp::tools::{ToolCallError, call_find, call_get_symbol, call_impact, list_tools};
 
 const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 const LATEST_PROTOCOL_VERSION: &str = "2025-06-18";
@@ -94,6 +94,7 @@ fn handle_tools_call(id: Value, params: &Value, conn: &Connection) -> String {
     let result = match tool_name {
         "get_symbol" => call_get_symbol(conn, &arguments),
         "impact" => call_impact(conn, &arguments),
+        "find" => call_find(conn, &arguments),
         _ => {
             return error_response(id, -32602, &format!("Unknown tool: {tool_name}"));
         }
@@ -174,6 +175,22 @@ mod tests {
         conn
     }
 
+    fn indexed_conn_with_duplicate_name_in_same_file() -> Connection {
+        let repo_dir = tempdir().unwrap();
+        fs::write(
+            repo_dir.path().join("overload.rs"),
+            b"pub fn widget(x: i32) -> i32 {\n    x\n}\n\npub fn widget(x: i32, y: i32) -> i32 {\n    x + y\n}\n",
+        )
+        .unwrap();
+
+        let root = RepoRoot::new(repo_dir.path()).unwrap();
+        let conn = open_connection(":memory:").unwrap();
+        let mut registry = LanguageRegistry::new();
+        registry.register(Box::new(RustSupport)).unwrap();
+        index_repo(&root, &conn, &registry).unwrap();
+        conn
+    }
+
     #[test]
     fn initialize_negotiates_supported_client_version() {
         let params = json!({ "protocolVersion": "2024-11-05" });
@@ -197,7 +214,7 @@ mod tests {
     }
 
     #[test]
-    fn tools_list_returns_get_symbol_and_impact() {
+    fn tools_list_returns_get_symbol_impact_and_find() {
         let conn = empty_conn();
         let response =
             handle_line(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#, &conn).unwrap();
@@ -207,7 +224,7 @@ mod tests {
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())
             .collect();
-        assert_eq!(names, vec!["get_symbol", "impact"]);
+        assert_eq!(names, vec!["get_symbol", "impact", "find"]);
     }
 
     #[test]
@@ -310,6 +327,213 @@ mod tests {
         let text = parsed["result"]["content"][0]["text"].as_str().unwrap();
         let payload: Value = serde_json::from_str(text).unwrap();
         assert_eq!(payload["results"][0]["truncated"], true);
+    }
+
+    #[test]
+    fn get_symbol_call_with_duplicate_name_in_same_file_returns_both_without_line() {
+        let conn = indexed_conn_with_duplicate_name_in_same_file();
+        let response = handle_line(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_symbol","arguments":{"name":"widget","file":"overload.rs"}}}"#,
+            &conn,
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&response).unwrap();
+        let text = parsed["result"]["content"][0]["text"].as_str().unwrap();
+        let payload: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(payload["count"], 2);
+    }
+
+    #[test]
+    fn get_symbol_call_with_line_narrows_duplicate_name_in_same_file_to_one() {
+        let conn = indexed_conn_with_duplicate_name_in_same_file();
+        let response = handle_line(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_symbol","arguments":{"name":"widget","file":"overload.rs","line":5}}}"#,
+            &conn,
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&response).unwrap();
+        let text = parsed["result"]["content"][0]["text"].as_str().unwrap();
+        let payload: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(payload["count"], 1);
+        assert_eq!(payload["results"][0]["line"], 5);
+        assert_eq!(
+            payload["results"][0]["signature"],
+            "pub fn widget(x: i32, y: i32) -> i32"
+        );
+    }
+
+    #[test]
+    fn get_symbol_call_with_line_but_no_file_is_invalid_params() {
+        let conn = indexed_conn();
+        let response = handle_line(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_symbol","arguments":{"name":"b","line":1}}}"#,
+            &conn,
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(parsed["error"]["code"], -32602);
+    }
+
+    #[test]
+    fn find_call_returns_matching_symbols() {
+        let conn = indexed_conn();
+        let response = handle_line(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"find","arguments":{"query":"a"}}}"#,
+            &conn,
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&response).unwrap();
+        let text = parsed["result"]["content"][0]["text"].as_str().unwrap();
+        let payload: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(payload["found"], true);
+        let names: Vec<&str> = payload["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, vec!["a"]);
+        assert_eq!(payload["results"][0]["file"], "a.rs");
+    }
+
+    #[test]
+    fn find_call_ranks_exact_match_before_prefix_and_substring_matches() {
+        let repo_dir = tempdir().unwrap();
+        fs::write(
+            repo_dir.path().join("widgets.rs"),
+            b"pub fn widget_factory() {}\n\npub fn old_widget() {}\n\npub fn widget() {}\n",
+        )
+        .unwrap();
+
+        let root = RepoRoot::new(repo_dir.path()).unwrap();
+        let conn = open_connection(":memory:").unwrap();
+        let mut registry = LanguageRegistry::new();
+        registry.register(Box::new(RustSupport)).unwrap();
+        index_repo(&root, &conn, &registry).unwrap();
+
+        let response = handle_line(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"find","arguments":{"query":"widget"}}}"#,
+            &conn,
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&response).unwrap();
+        let text = parsed["result"]["content"][0]["text"].as_str().unwrap();
+        let payload: Value = serde_json::from_str(text).unwrap();
+        let names: Vec<&str> = payload["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, vec!["widget", "widget_factory", "old_widget"]);
+    }
+
+    #[test]
+    fn find_call_respects_limit() {
+        let repo_dir = tempdir().unwrap();
+        fs::write(
+            repo_dir.path().join("widgets.rs"),
+            b"pub fn widget_a() {}\n\npub fn widget_b() {}\n\npub fn widget_c() {}\n",
+        )
+        .unwrap();
+
+        let root = RepoRoot::new(repo_dir.path()).unwrap();
+        let conn = open_connection(":memory:").unwrap();
+        let mut registry = LanguageRegistry::new();
+        registry.register(Box::new(RustSupport)).unwrap();
+        index_repo(&root, &conn, &registry).unwrap();
+
+        let response = handle_line(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"find","arguments":{"query":"widget","limit":2}}}"#,
+            &conn,
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&response).unwrap();
+        let text = parsed["result"]["content"][0]["text"].as_str().unwrap();
+        let payload: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(payload["count"], 2);
+        assert_eq!(payload["total_matches"], 3);
+        assert_eq!(payload["truncated"], true);
+        assert_eq!(payload["truncated_count"], 1);
+    }
+
+    #[test]
+    fn find_call_with_tiny_budget_is_truncated() {
+        let conn = indexed_conn();
+        let response = handle_line(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"find","arguments":{"query":"a","token_budget":1}}}"#,
+            &conn,
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&response).unwrap();
+        let text = parsed["result"]["content"][0]["text"].as_str().unwrap();
+        let payload: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(payload["truncated"], true);
+    }
+
+    #[test]
+    fn find_call_for_no_matches_reports_not_found() {
+        let conn = indexed_conn();
+        let response = handle_line(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"find","arguments":{"query":"ghost"}}}"#,
+            &conn,
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&response).unwrap();
+        let text = parsed["result"]["content"][0]["text"].as_str().unwrap();
+        let payload: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(payload["found"], false);
+        assert!(payload["message"].as_str().unwrap().contains("ghost"));
+    }
+
+    #[test]
+    fn find_call_missing_query_argument_is_invalid_params() {
+        let conn = empty_conn();
+        let response = handle_line(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"find","arguments":{}}}"#,
+            &conn,
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(parsed["error"]["code"], -32602);
+    }
+
+    #[test]
+    fn find_then_get_symbol_workflow_disambiguates_duplicate_name() {
+        let conn = indexed_conn_with_duplicate_name_in_same_file();
+        let find_response = handle_line(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"find","arguments":{"query":"widget"}}}"#,
+            &conn,
+        )
+        .unwrap();
+        let find_parsed: Value = serde_json::from_str(&find_response).unwrap();
+        let find_text = find_parsed["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap();
+        let find_payload: Value = serde_json::from_str(find_text).unwrap();
+        assert_eq!(find_payload["count"], 2);
+
+        let second_match = &find_payload["results"][1];
+        let file = second_match["file"].as_str().unwrap();
+        let line = second_match["line"].as_u64().unwrap();
+
+        let get_symbol_request = json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "get_symbol",
+                "arguments": { "name": "widget", "file": file, "line": line }
+            }
+        });
+        let get_symbol_response = handle_line(&get_symbol_request.to_string(), &conn).unwrap();
+        let get_symbol_parsed: Value = serde_json::from_str(&get_symbol_response).unwrap();
+        let get_symbol_text = get_symbol_parsed["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap();
+        let get_symbol_payload: Value = serde_json::from_str(get_symbol_text).unwrap();
+        assert_eq!(get_symbol_payload["count"], 1);
+        assert_eq!(get_symbol_payload["results"][0]["line"], line);
     }
 
     #[test]

@@ -2,7 +2,7 @@ use std::collections::{HashSet, VecDeque};
 
 use rusqlite::{Connection, params};
 
-use crate::budget::{TokenBudget, estimate_node_tokens};
+use crate::budget::{TokenBudget, estimate_node_tokens, estimate_symbol_tokens};
 use crate::error::Result;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,9 +43,22 @@ struct SymbolRow {
     info: SymbolInfo,
 }
 
-fn find_symbol_rows(conn: &Connection, name: &str, file: Option<&str>) -> Result<Vec<SymbolRow>> {
-    let sql = match file {
-        Some(_) => {
+fn find_symbol_rows(
+    conn: &Connection,
+    name: &str,
+    file: Option<&str>,
+    line: Option<u32>,
+) -> Result<Vec<SymbolRow>> {
+    let sql = match (file, line) {
+        (Some(_), Some(_)) => {
+            "SELECT symbols.id, symbols.file_id, symbols.name, symbols.kind, symbols.line,
+                    symbols.signature, symbols.is_public, files.path
+             FROM symbols
+             JOIN files ON files.id = symbols.file_id
+             WHERE symbols.name = ?1 AND files.path = ?2 AND symbols.line = ?3
+             ORDER BY files.path, symbols.line"
+        }
+        (Some(_), None) => {
             "SELECT symbols.id, symbols.file_id, symbols.name, symbols.kind, symbols.line,
                     symbols.signature, symbols.is_public, files.path
              FROM symbols
@@ -53,7 +66,7 @@ fn find_symbol_rows(conn: &Connection, name: &str, file: Option<&str>) -> Result
              WHERE symbols.name = ?1 AND files.path = ?2
              ORDER BY files.path, symbols.line"
         }
-        None => {
+        (None, _) => {
             "SELECT symbols.id, symbols.file_id, symbols.name, symbols.kind, symbols.line,
                     symbols.signature, symbols.is_public, files.path
              FROM symbols
@@ -64,9 +77,10 @@ fn find_symbol_rows(conn: &Connection, name: &str, file: Option<&str>) -> Result
     };
 
     let mut stmt = conn.prepare(sql)?;
-    let rows = match file {
-        Some(file) => stmt.query_map(params![name, file], map_symbol_row)?,
-        None => stmt.query_map(params![name], map_symbol_row)?,
+    let rows = match (file, line) {
+        (Some(file), Some(line)) => stmt.query_map(params![name, file, line], map_symbol_row)?,
+        (Some(file), None) => stmt.query_map(params![name, file], map_symbol_row)?,
+        (None, _) => stmt.query_map(params![name], map_symbol_row)?,
     };
     rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
 }
@@ -146,8 +160,13 @@ fn find_callers(conn: &Connection, file_id: i64, name: &str) -> Result<Vec<Calle
         .collect())
 }
 
-pub fn get_symbol(conn: &Connection, name: &str, file: Option<&str>) -> Result<Vec<SymbolResult>> {
-    let symbol_rows = find_symbol_rows(conn, name, file)?;
+pub fn get_symbol(
+    conn: &Connection,
+    name: &str,
+    file: Option<&str>,
+    line: Option<u32>,
+) -> Result<Vec<SymbolResult>> {
+    let symbol_rows = find_symbol_rows(conn, name, file, line)?;
 
     let mut results = Vec::with_capacity(symbol_rows.len());
     for symbol_row in symbol_rows {
@@ -265,7 +284,7 @@ pub fn impact(
     file: Option<&str>,
     mut budget: TokenBudget,
 ) -> Result<Vec<ImpactResult>> {
-    let symbol_rows = find_symbol_rows(conn, name, file)?;
+    let symbol_rows = find_symbol_rows(conn, name, file, None)?;
 
     let mut results = Vec::with_capacity(symbol_rows.len());
     for symbol_row in &symbol_rows {
@@ -273,4 +292,118 @@ pub fn impact(
     }
 
     Ok(results)
+}
+
+pub const DEFAULT_FIND_LIMIT: usize = 20;
+pub const MAX_FIND_LIMIT: usize = 200;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FindMatch {
+    pub name: String,
+    pub file: String,
+    pub line: u32,
+    pub kind: String,
+    pub signature: Option<String>,
+    pub is_public: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FindResult {
+    pub matches: Vec<FindMatch>,
+    pub total_matches: usize,
+    pub truncated: bool,
+    pub truncated_count: usize,
+}
+
+fn escape_like_pattern(input: &str) -> String {
+    let mut escaped = String::with_capacity(input.len());
+    for ch in input.chars() {
+        if ch == '\\' || ch == '%' || ch == '_' {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped
+}
+
+fn map_find_match_row(row: &rusqlite::Row) -> rusqlite::Result<FindMatch> {
+    Ok(FindMatch {
+        name: row.get(0)?,
+        kind: row.get(1)?,
+        line: row.get(2)?,
+        signature: row.get(3)?,
+        is_public: row.get(4)?,
+        file: row.get(5)?,
+    })
+}
+
+pub fn find(
+    conn: &Connection,
+    query: &str,
+    limit: usize,
+    mut budget: TokenBudget,
+) -> Result<FindResult> {
+    let escaped = escape_like_pattern(query);
+    let exact_pattern = escaped.clone();
+    let prefix_pattern = format!("{escaped}%");
+    let contains_pattern = format!("%{escaped}%");
+    let effective_limit = limit.min(MAX_FIND_LIMIT) as i64;
+
+    let total_matches: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM symbols WHERE symbols.name LIKE ?1 ESCAPE '\\'",
+        params![contains_pattern],
+        |row| row.get(0),
+    )?;
+    let total_matches = total_matches as usize;
+
+    let mut stmt = conn.prepare(
+        "SELECT symbols.name, symbols.kind, symbols.line, symbols.signature, symbols.is_public,
+                files.path,
+                CASE
+                    WHEN symbols.name LIKE ?2 ESCAPE '\\' THEN 0
+                    WHEN symbols.name LIKE ?3 ESCAPE '\\' THEN 1
+                    ELSE 2
+                END AS match_rank
+         FROM symbols
+         JOIN files ON files.id = symbols.file_id
+         WHERE symbols.name LIKE ?1 ESCAPE '\\'
+         ORDER BY match_rank, symbols.name, files.path, symbols.line
+         LIMIT ?4",
+    )?;
+
+    let rows = stmt.query_map(
+        params![
+            contains_pattern,
+            exact_pattern,
+            prefix_pattern,
+            effective_limit
+        ],
+        map_find_match_row,
+    )?;
+
+    let mut matches = Vec::new();
+    for row in rows {
+        let candidate = row?;
+        let token_estimate = estimate_symbol_tokens(
+            &candidate.name,
+            &candidate.file,
+            candidate.line,
+            &candidate.kind,
+            candidate.signature.as_deref(),
+            candidate.is_public,
+        );
+        if !budget.try_consume(token_estimate) {
+            break;
+        }
+        matches.push(candidate);
+    }
+
+    let truncated_count = total_matches.saturating_sub(matches.len());
+
+    Ok(FindResult {
+        matches,
+        total_matches,
+        truncated: truncated_count > 0,
+        truncated_count,
+    })
 }
