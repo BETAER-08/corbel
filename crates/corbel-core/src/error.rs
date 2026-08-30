@@ -1,5 +1,11 @@
 use std::path::PathBuf;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SchemaCondition {
+    VersionMismatch(i64),
+    Unreadable,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("I/O error at {path}: {source}")]
@@ -14,6 +20,12 @@ pub enum Error {
 
     #[error("migration failed: expected schema version {expected}, found {found}")]
     Migration { expected: i64, found: i64 },
+
+    #[error("index schema is incompatible with this binary (expected version {expected})")]
+    IncompatibleSchema {
+        expected: i64,
+        condition: SchemaCondition,
+    },
 
     #[error("path {path} escapes repository root")]
     PathEscapesRoot { path: PathBuf },

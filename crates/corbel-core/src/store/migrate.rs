@@ -1,14 +1,77 @@
-use crate::error::{Error, Result};
+use crate::error::{Error, Result, SchemaCondition};
 use crate::store::schema::{CURRENT_SCHEMA_VERSION, create_schema};
-use rusqlite::Connection;
-use std::path::Path;
+use rusqlite::{Connection, OpenFlags};
+use std::path::{Path, PathBuf};
+
+fn read_schema_version(conn: &Connection) -> Option<i32> {
+    conn.query_row("PRAGMA user_version", [], |row| row.get(0))
+        .ok()
+}
+
+fn sibling_with_suffix(db_path: &Path, suffix: &str) -> PathBuf {
+    let mut os_string = db_path.as_os_str().to_os_string();
+    os_string.push(suffix);
+    PathBuf::from(os_string)
+}
+
+fn remove_file_if_exists(path: &Path) -> Result<()> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(Error::io(path, err)),
+    }
+}
+
+fn rebuild_db_files(db_path: &Path) -> Result<()> {
+    remove_file_if_exists(&sibling_with_suffix(db_path, "-wal"))?;
+    remove_file_if_exists(&sibling_with_suffix(db_path, "-shm"))?;
+    remove_file_if_exists(db_path)?;
+    Ok(())
+}
 
 pub fn open_connection(db_path: impl AsRef<Path>) -> Result<Connection> {
-    let conn = Connection::open(db_path.as_ref()).map_err(Error::Sqlite)?;
+    let db_path = db_path.as_ref();
+    let conn = Connection::open(db_path).map_err(Error::Sqlite)?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
+
+    if read_schema_version(&conn).is_none() {
+        drop(conn);
+        rebuild_db_files(db_path)?;
+        let conn = Connection::open(db_path).map_err(Error::Sqlite)?;
+        conn.pragma_update(None, "foreign_keys", "ON")?;
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        create_schema(&conn)?;
+        return Ok(conn);
+    }
+
     conn.pragma_update(None, "journal_mode", "WAL")?;
     migrate(&conn)?;
     Ok(conn)
+}
+
+pub fn open_for_serve(db_path: impl AsRef<Path>) -> Result<Connection> {
+    let db_path = db_path.as_ref();
+    let conn = Connection::open_with_flags(
+        db_path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | OpenFlags::SQLITE_OPEN_URI,
+    )
+    .map_err(Error::Sqlite)?;
+    conn.pragma_update(None, "foreign_keys", "ON")?;
+    conn.pragma_update(None, "query_only", "ON")?;
+
+    match read_schema_version(&conn) {
+        Some(version) if version == CURRENT_SCHEMA_VERSION => Ok(conn),
+        Some(version) => Err(Error::IncompatibleSchema {
+            expected: CURRENT_SCHEMA_VERSION as i64,
+            condition: SchemaCondition::VersionMismatch(version as i64),
+        }),
+        None => Err(Error::IncompatibleSchema {
+            expected: CURRENT_SCHEMA_VERSION as i64,
+            condition: SchemaCondition::Unreadable,
+        }),
+    }
 }
 
 pub fn migrate(conn: &Connection) -> Result<()> {

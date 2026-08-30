@@ -2,8 +2,9 @@ use std::io;
 use std::path::Path;
 
 use anyhow::Context;
+use corbel_core::error::{Error, SchemaCondition};
 use corbel_core::path::RepoRoot;
-use corbel_core::store::migrate::open_connection;
+use corbel_core::store::migrate::open_for_serve;
 
 use crate::mcp::server::McpServer;
 
@@ -20,8 +21,35 @@ pub fn run(path: &Path) -> anyhow::Result<()> {
         );
     }
 
-    let conn = open_connection(&db_path)
-        .with_context(|| format!("failed to open index database at {}", db_path.display()))?;
+    let conn = match open_for_serve(&db_path) {
+        Ok(conn) => conn,
+        Err(Error::IncompatibleSchema {
+            expected,
+            condition: SchemaCondition::VersionMismatch(found),
+        }) => {
+            anyhow::bail!(
+                "index at {} has schema version {found}, but this binary expects version {expected}. Run `corbel index {}` to rebuild it.",
+                db_path.display(),
+                path.display()
+            );
+        }
+        Err(Error::IncompatibleSchema {
+            condition: SchemaCondition::Unreadable,
+            ..
+        }) => {
+            anyhow::bail!(
+                "the file at {} could not be read as a corbel index. It may be corrupted, or {} may not be the path you meant to serve. Run `corbel index {}` to rebuild it, or double-check the path.",
+                db_path.display(),
+                db_path.display(),
+                path.display()
+            );
+        }
+        Err(err) => {
+            return Err(err).with_context(|| {
+                format!("failed to open index database at {}", db_path.display())
+            });
+        }
+    };
 
     let server = McpServer::new(conn);
 
