@@ -1,0 +1,60 @@
+name: DCO
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check every commit in this PR for a matching Signed-off-by trailer
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          range="${BASE_SHA}..${HEAD_SHA}"
+          commits=$(git rev-list --no-merges "$range")
+
+          if [ -z "$commits" ]; then
+            echo "No non-merge commits in range $range; nothing to check."
+            exit 0
+          fi
+
+          failed=0
+          for sha in $commits; do
+            author_email=$(git log -1 --format='%ae' "$sha")
+            committer_email=$(git log -1 --format='%ce' "$sha")
+            body=$(git log -1 --format='%B' "$sha")
+
+            match=$(printf '%s\n' "$body" | grep -iE "^Signed-off-by: .+ <(${author_email//./\\.}|${committer_email//./\\.})>\$" || true)
+
+            if [ -z "$match" ]; then
+              subject=$(git log -1 --format='%s' "$sha")
+              echo "::error::commit $sha (\"$subject\") has no Signed-off-by trailer matching its author ($author_email) or committer ($committer_email) email."
+              failed=1
+            else
+              echo "$sha: ok ($match)"
+            fi
+          done
+
+          if [ "$failed" -ne 0 ]; then
+            echo ""
+            echo "One or more commits are missing a DCO sign-off. Fix with:"
+            echo "  git commit --amend -s --no-edit        # last commit only"
+            echo "  git rebase --signoff ${BASE_SHA}        # every commit on this branch"
+            echo "See CONTRIBUTING.md#developer-certificate-of-origin."
+            exit 1
+          fi
