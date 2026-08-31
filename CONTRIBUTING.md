@@ -15,6 +15,40 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace
 ```
 
+## Developer Certificate of Origin
+
+Every commit must be signed off under the
+[Developer Certificate of Origin 1.1](https://developercertificate.org/).
+Signing off is a statement that you wrote the change (or otherwise have the
+right to submit it) and agree to submit it under this project's license — it
+is not a copyright assignment and requires no separate paperwork.
+
+Sign off with `-s` on every commit:
+
+```
+git commit -s -m "add TSX import-namespace test fixture"
+```
+
+This appends a trailer to the commit message:
+
+```
+Signed-off-by: Your Name <your.email@example.com>
+```
+
+The name and email must match the commit's author identity
+(`git config user.name` / `user.email`), since that identity is what the
+sign-off is attesting for.
+
+If you forgot the flag:
+
+- Last commit only: `git commit --amend -s --no-edit`
+- Every commit on the branch since it diverged from `main`:
+  `git rebase --signoff main`
+
+CI checks every commit introduced by a pull request (not the repository's
+existing history) for a matching `Signed-off-by` trailer and fails the
+pull request if any commit is missing one.
+
 ## Adding a language
 
 A new language is promoted only when it clears every gate below:

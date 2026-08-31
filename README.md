@@ -161,7 +161,7 @@ Indexing and querying your own codebase â€” the entire tool as it exists today â
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow, the language-promotion gates, and the schema-migration rules.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow, the language-promotion gates, and the schema-migration rules. Every commit must carry a DCO sign-off (`git commit -s`).
 
 ## Privacy
 
