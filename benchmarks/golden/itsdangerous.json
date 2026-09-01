@@ -12,54 +12,158 @@
   "entries": [
     {
       "id": "itsdangerous-01",
-      "symbol": { "name": "want_bytes", "file": "src/itsdangerous/encoding.py", "line": 11, "kind": "function" },
+      "symbol": {
+        "name": "want_bytes",
+        "file": "src/itsdangerous/encoding.py",
+        "line": 11,
+        "kind": "function"
+      },
       "category": "multi_hop",
       "tasks": {
         "callers": [
-          { "file": "src/itsdangerous/timed.py", "line": 47, "enclosing_symbol": "TimestampSigner.sign" },
-          { "file": "src/itsdangerous/timed.py", "line": 49, "enclosing_symbol": "TimestampSigner.sign" },
-          { "file": "src/itsdangerous/timed.py", "line": 95, "enclosing_symbol": "TimestampSigner.unsign" },
-          { "file": "src/itsdangerous/timed.py", "line": 199, "enclosing_symbol": "TimedSerializer.loads" },
-          { "file": "src/itsdangerous/signer.py", "line": 71, "enclosing_symbol": "_make_keys_list" },
-          { "file": "src/itsdangerous/signer.py", "line": 73, "enclosing_symbol": "_make_keys_list" },
-          { "file": "src/itsdangerous/signer.py", "line": 144, "enclosing_symbol": "Signer.__init__" },
-          { "file": "src/itsdangerous/signer.py", "line": 154, "enclosing_symbol": "Signer.__init__" },
-          { "file": "src/itsdangerous/signer.py", "line": 198, "enclosing_symbol": "Signer.derive_key" },
-          { "file": "src/itsdangerous/signer.py", "line": 217, "enclosing_symbol": "Signer.get_signature" },
-          { "file": "src/itsdangerous/signer.py", "line": 224, "enclosing_symbol": "Signer.sign" },
-          { "file": "src/itsdangerous/signer.py", "line": 234, "enclosing_symbol": "Signer.verify_signature" },
-          { "file": "src/itsdangerous/signer.py", "line": 246, "enclosing_symbol": "Signer.unsign" },
-          { "file": "src/itsdangerous/serializer.py", "line": 211, "enclosing_symbol": "Serializer.__init__" },
-          { "file": "src/itsdangerous/serializer.py", "line": 276, "enclosing_symbol": "Serializer.dump_payload" },
-          { "file": "src/itsdangerous/serializer.py", "line": 314, "enclosing_symbol": "Serializer.dumps" },
-          { "file": "src/itsdangerous/serializer.py", "line": 334, "enclosing_symbol": "Serializer.loads" },
-          { "file": "src/itsdangerous/encoding.py", "line": 24, "enclosing_symbol": "base64_encode" },
-          { "file": "src/itsdangerous/encoding.py", "line": 32, "enclosing_symbol": "base64_decode" }
+          {
+            "file": "src/itsdangerous/timed.py",
+            "line": 47,
+            "enclosing_symbol": "TimestampSigner.sign"
+          },
+          {
+            "file": "src/itsdangerous/timed.py",
+            "line": 49,
+            "enclosing_symbol": "TimestampSigner.sign"
+          },
+          {
+            "file": "src/itsdangerous/timed.py",
+            "line": 95,
+            "enclosing_symbol": "TimestampSigner.unsign"
+          },
+          {
+            "file": "src/itsdangerous/timed.py",
+            "line": 199,
+            "enclosing_symbol": "TimedSerializer.loads"
+          },
+          {
+            "file": "src/itsdangerous/signer.py",
+            "line": 71,
+            "enclosing_symbol": "_make_keys_list"
+          },
+          {
+            "file": "src/itsdangerous/signer.py",
+            "line": 73,
+            "enclosing_symbol": "_make_keys_list"
+          },
+          {
+            "file": "src/itsdangerous/signer.py",
+            "line": 144,
+            "enclosing_symbol": "Signer.__init__"
+          },
+          {
+            "file": "src/itsdangerous/signer.py",
+            "line": 154,
+            "enclosing_symbol": "Signer.__init__"
+          },
+          {
+            "file": "src/itsdangerous/signer.py",
+            "line": 198,
+            "enclosing_symbol": "Signer.derive_key"
+          },
+          {
+            "file": "src/itsdangerous/signer.py",
+            "line": 217,
+            "enclosing_symbol": "Signer.get_signature"
+          },
+          {
+            "file": "src/itsdangerous/signer.py",
+            "line": 224,
+            "enclosing_symbol": "Signer.sign"
+          },
+          {
+            "file": "src/itsdangerous/signer.py",
+            "line": 234,
+            "enclosing_symbol": "Signer.verify_signature"
+          },
+          {
+            "file": "src/itsdangerous/signer.py",
+            "line": 246,
+            "enclosing_symbol": "Signer.unsign"
+          },
+          {
+            "file": "src/itsdangerous/serializer.py",
+            "line": 211,
+            "enclosing_symbol": "Serializer.__init__"
+          },
+          {
+            "file": "src/itsdangerous/serializer.py",
+            "line": 276,
+            "enclosing_symbol": "Serializer.dump_payload"
+          },
+          {
+            "file": "src/itsdangerous/serializer.py",
+            "line": 314,
+            "enclosing_symbol": "Serializer.dumps"
+          },
+          {
+            "file": "src/itsdangerous/serializer.py",
+            "line": 334,
+            "enclosing_symbol": "Serializer.loads"
+          },
+          {
+            "file": "src/itsdangerous/encoding.py",
+            "line": 24,
+            "enclosing_symbol": "base64_encode"
+          },
+          {
+            "file": "src/itsdangerous/encoding.py",
+            "line": 32,
+            "enclosing_symbol": "base64_decode"
+          }
         ]
       },
       "verification_note": "want_bytes is a unique, unambiguous name across the package with 19 real call sites (18 outside its own file plus 2 inside encoding.py itself, at lines 24 and 32, inside sibling functions base64_encode/base64_decode). Every line above was individually opened and read; several sit inside classes with multiple same-name overload stubs (Signer.__init__ has 6 @overload-decorated signatures at lines 108-190, TimestampSigner.unsign has 2 @t.overload stubs at 57/65 before the real implementation at 72) so the enclosing-def search intentionally walks to the nearest preceding `def` regardless of decorator, which lands on the real (non-stub) implementation in every case here since typing stubs have no body to call anything from."
     },
     {
       "id": "itsdangerous-02",
-      "symbol": { "name": "get_signature", "file": "src/itsdangerous/signer.py", "line": 215, "kind": "method", "owner": "Signer" },
+      "symbol": {
+        "name": "get_signature",
+        "file": "src/itsdangerous/signer.py",
+        "line": 215,
+        "kind": "method",
+        "owner": "Signer"
+      },
       "category": "overload_ambiguous_name",
       "tasks": {
         "callers": [
-          { "file": "src/itsdangerous/signer.py", "line": 225, "enclosing_symbol": "Signer.sign" },
-          { "file": "src/itsdangerous/timed.py", "line": 51, "enclosing_symbol": "TimestampSigner.sign" }
+          {
+            "file": "src/itsdangerous/signer.py",
+            "line": 225,
+            "enclosing_symbol": "Signer.sign"
+          },
+          {
+            "file": "src/itsdangerous/timed.py",
+            "line": 51,
+            "enclosing_symbol": "TimestampSigner.sign"
+          }
         ]
       },
       "verification_note": "`get_signature` is defined 4 times in this package: SigningAlgorithm.get_signature (abstract, signer.py:20, 2 args beyond self), NoneAlgorithm.get_signature (signer.py:36, 2 args), HMACAlgorithm.get_signature (signer.py:62, 2 args), and Signer.get_signature (this entry, signer.py:215, 1 arg beyond self). This entry targets specifically Signer.get_signature. `rg -n \"get_signature\\(\" src/` returns 7 lines total: the declaration/2 other definitions (20,36,62), one call inside get_signature itself to a *different* get_signature (signer.py:219, self.algorithm.get_signature(key, value) - 2-arg form, targets the SigningAlgorithm family, not this entry - see itsdangerous-03), and the 2 real 1-arg callers of this entry listed above. A tool that cannot distinguish the 1-arg Signer.get_signature call shape from the 2-arg SigningAlgorithm.get_signature call shape will over-count."
     },
     {
       "id": "itsdangerous-03",
-      "symbol": { "name": "get_signature", "file": "src/itsdangerous/signer.py", "line": 215, "kind": "method", "owner": "Signer" },
+      "symbol": {
+        "name": "get_signature",
+        "file": "src/itsdangerous/signer.py",
+        "line": 215,
+        "kind": "method",
+        "owner": "Signer"
+      },
       "category": "dynamic_dispatch",
       "tasks": {
         "callees": {
           "ambiguous": true,
           "ground_truth": [
-            { "name": "get_signature", "note": "self.algorithm.get_signature(key, value) at signer.py:219; self.algorithm: SigningAlgorithm is duck-typed and set to a NoneAlgorithm (signer.py:36) or HMACAlgorithm (signer.py:62) instance at construction time (Signer.__init__ digest_method parameter), not determinable from this call site alone." }
+            {
+              "name": "get_signature",
+              "note": "self.algorithm.get_signature(key, value) at signer.py:219; self.algorithm: SigningAlgorithm is duck-typed and set to a NoneAlgorithm (signer.py:36) or HMACAlgorithm (signer.py:62) instance at construction time (Signer.__init__ digest_method parameter), not determinable from this call site alone."
+            }
           ]
         }
       },
@@ -67,42 +171,278 @@
     },
     {
       "id": "itsdangerous-04",
-      "symbol": { "name": "unsign", "file": "src/itsdangerous/signer.py", "line": 244, "kind": "method", "owner": "Signer" },
+      "symbol": {
+        "name": "unsign",
+        "file": "src/itsdangerous/signer.py",
+        "line": 244,
+        "kind": "method",
+        "owner": "Signer"
+      },
       "category": "simple",
       "tasks": {
         "callers": [
-          { "file": "src/itsdangerous/timed.py", "line": 89, "enclosing_symbol": "TimestampSigner.unsign", "note": "super().unsign(signed_value) - single inheritance, statically resolvable." },
-          { "file": "src/itsdangerous/signer.py", "line": 263, "enclosing_symbol": "Signer.validate" },
-          { "file": "src/itsdangerous/serializer.py", "line": 339, "enclosing_symbol": "Serializer.loads" }
+          {
+            "file": "src/itsdangerous/timed.py",
+            "line": 89,
+            "enclosing_symbol": "TimestampSigner.unsign",
+            "note": "super().unsign(signed_value) - single inheritance, statically resolvable."
+          },
+          {
+            "file": "src/itsdangerous/signer.py",
+            "line": 263,
+            "enclosing_symbol": "Signer.validate"
+          },
+          {
+            "file": "src/itsdangerous/serializer.py",
+            "line": 339,
+            "enclosing_symbol": "Serializer.loads"
+          }
         ]
       },
       "verification_note": "`unsign` is also defined on TimestampSigner (timed.py, 2 @t.overload stubs at 57/65 plus the real implementation at 72), which overrides this Signer.unsign for timed serializers. The 3 callers listed all statically resolve to this base Signer.unsign: timed.py:89 uses explicit `super()`, which Python resolves via TimestampSigner's single base class (Signer) with no ambiguity; signer.py:263 is a same-class call; serializer.py:339 calls `.unsign(...)` on a variable whose declared/constructed type in Serializer.loads's own code path is plain Signer (TimedSerializer overrides loads/loads_unsafe separately in timed.py rather than reusing this path). rg -n \"\\.unsign\\(\" src/ returns exactly these 3 non-definition lines plus one more, timed.py:164, which calls self.unsign on a TimestampSigner instance (excluded from this entry's ground truth since it targets TimestampSigner.unsign, not Signer.unsign)."
     },
     {
       "id": "itsdangerous-05",
-      "symbol": { "name": "base64_encode", "file": "src/itsdangerous/encoding.py", "line": 20, "kind": "function" },
+      "symbol": {
+        "name": "base64_encode",
+        "file": "src/itsdangerous/encoding.py",
+        "line": 20,
+        "kind": "function"
+      },
       "category": "simple",
       "tasks": {
         "callers": [
-          { "file": "src/itsdangerous/url_safe.py", "line": 64, "enclosing_symbol": "URLSafeSerializerMixin.dump_payload" },
-          { "file": "src/itsdangerous/timed.py", "line": 48, "enclosing_symbol": "TimestampSigner.sign" },
-          { "file": "src/itsdangerous/signer.py", "line": 220, "enclosing_symbol": "Signer.get_signature" }
+          {
+            "file": "src/itsdangerous/url_safe.py",
+            "line": 64,
+            "enclosing_symbol": "URLSafeSerializerMixin.dump_payload"
+          },
+          {
+            "file": "src/itsdangerous/timed.py",
+            "line": 48,
+            "enclosing_symbol": "TimestampSigner.sign"
+          },
+          {
+            "file": "src/itsdangerous/signer.py",
+            "line": 220,
+            "enclosing_symbol": "Signer.get_signature"
+          }
         ]
       },
       "verification_note": "Unique name across the package. `rg -n \"base64_encode\\(\" src/` returns the declaration plus exactly these 3 call sites."
     },
     {
       "id": "itsdangerous-06",
-      "symbol": { "name": "base64_decode", "file": "src/itsdangerous/encoding.py", "line": 28, "kind": "function" },
+      "symbol": {
+        "name": "base64_decode",
+        "file": "src/itsdangerous/encoding.py",
+        "line": 28,
+        "kind": "function"
+      },
       "category": "simple",
       "tasks": {
         "callers": [
-          { "file": "src/itsdangerous/url_safe.py", "line": 37, "enclosing_symbol": "URLSafeSerializerMixin.load_payload" },
-          { "file": "src/itsdangerous/timed.py", "line": 113, "enclosing_symbol": "TimestampSigner.unsign" },
-          { "file": "src/itsdangerous/signer.py", "line": 230, "enclosing_symbol": "Signer.verify_signature" }
+          {
+            "file": "src/itsdangerous/url_safe.py",
+            "line": 37,
+            "enclosing_symbol": "URLSafeSerializerMixin.load_payload"
+          },
+          {
+            "file": "src/itsdangerous/timed.py",
+            "line": 113,
+            "enclosing_symbol": "TimestampSigner.unsign"
+          },
+          {
+            "file": "src/itsdangerous/signer.py",
+            "line": 230,
+            "enclosing_symbol": "Signer.verify_signature"
+          }
         ]
       },
       "verification_note": "Unique name across the package. `rg -n \"base64_decode\\(\" src/` returns the declaration plus exactly these 3 call sites."
+    },
+    {
+      "id": "itsdangerous-07",
+      "commit": "672971d66a2ef9f85151e53283113f33d642dabd",
+      "language": "python",
+      "difficulty": "easy",
+      "category": "simple",
+      "symbol": {
+        "name": "derive_key",
+        "file": "src/itsdangerous/signer.py",
+        "line": 182,
+        "kind": "method",
+        "owner": "Signer"
+      },
+      "tasks": {
+        "callers": [
+          {
+            "file": "src/itsdangerous/signer.py",
+            "line": 215,
+            "enclosing_symbol": "Signer.get_signature",
+            "call_line": 218
+          },
+          {
+            "file": "src/itsdangerous/signer.py",
+            "line": 227,
+            "enclosing_symbol": "Signer.verify_signature",
+            "call_line": 237
+          }
+        ],
+        "callees": [],
+        "impact": null
+      },
+      "verification": {
+        "verified_by": "claude-sonnet-5",
+        "verification_date": "2026-09-01",
+        "verification_method": "Direct reading of source files via the Read tool, with ripgrep used only to enumerate candidate line numbers (never corbel) which were then individually opened and read in context to confirm each is a real call and to identify its enclosing function. corbel was never executed to produce any answer in this file. Draft candidates and caller lists were first generated by benchmarks/goldenset/lsp_to_draft.py (pyright / rust-analyzer), then every caller line was independently cross-checked against ripgrep output and manually read before being accepted or rejected.",
+        "verification_note": "Signer.derive_key, unique name in the package (name_count=1 by ctags). `rg -n \"derive_key\\(\" src/` returns the declaration plus exactly these 2 call sites, both same-file, both self.derive_key(...) with no override anywhere in the class hierarchy.",
+        "reverification": null
+      }
+    },
+    {
+      "id": "itsdangerous-08",
+      "commit": "672971d66a2ef9f85151e53283113f33d642dabd",
+      "language": "python",
+      "difficulty": "easy",
+      "category": "simple",
+      "symbol": {
+        "name": "make_signer",
+        "file": "src/itsdangerous/serializer.py",
+        "line": 278,
+        "kind": "method",
+        "owner": "Serializer"
+      },
+      "tasks": {
+        "callers": [
+          {
+            "file": "src/itsdangerous/serializer.py",
+            "line": 287,
+            "enclosing_symbol": "Serializer.iter_unsigners",
+            "call_line": 295
+          },
+          {
+            "file": "src/itsdangerous/serializer.py",
+            "line": 309,
+            "enclosing_symbol": "Serializer.dumps",
+            "call_line": 315
+          }
+        ],
+        "callees": [],
+        "impact": null
+      },
+      "verification": {
+        "verified_by": "claude-sonnet-5",
+        "verification_date": "2026-09-01",
+        "verification_method": "Direct reading of source files via the Read tool, with ripgrep used only to enumerate candidate line numbers (never corbel) which were then individually opened and read in context to confirm each is a real call and to identify its enclosing function. corbel was never executed to produce any answer in this file. Draft candidates and caller lists were first generated by benchmarks/goldenset/lsp_to_draft.py (pyright / rust-analyzer), then every caller line was independently cross-checked against ripgrep output and manually read before being accepted or rejected.",
+        "verification_note": "Unique name in the package. `rg -n \"make_signer\\(\" src/` returns the declaration plus exactly these 2 same-file call sites.",
+        "reverification": null
+      }
+    },
+    {
+      "id": "itsdangerous-09",
+      "commit": "672971d66a2ef9f85151e53283113f33d642dabd",
+      "language": "python",
+      "difficulty": "medium",
+      "category": "overload_ambiguous_name",
+      "symbol": {
+        "name": "verify_signature",
+        "file": "src/itsdangerous/signer.py",
+        "line": 227,
+        "kind": "method",
+        "owner": "Signer"
+      },
+      "tasks": {
+        "callers": [
+          {
+            "file": "src/itsdangerous/signer.py",
+            "line": 244,
+            "enclosing_symbol": "Signer.unsign",
+            "call_line": 253
+          }
+        ],
+        "callees": [],
+        "impact": null
+      },
+      "verification": {
+        "verified_by": "claude-sonnet-5",
+        "verification_date": "2026-09-01",
+        "verification_method": "Direct reading of source files via the Read tool, with ripgrep used only to enumerate candidate line numbers (never corbel) which were then individually opened and read in context to confirm each is a real call and to identify its enclosing function. corbel was never executed to produce any answer in this file. Draft candidates and caller lists were first generated by benchmarks/goldenset/lsp_to_draft.py (pyright / rust-analyzer), then every caller line was independently cross-checked against ripgrep output and manually read before being accepted or rejected.",
+        "verification_note": "verify_signature is defined 4 times in this package (SigningAlgorithm.verify_signature signer.py:24 abstract/2-arg, NoneAlgorithm's and HMACAlgorithm's concrete overrides at 36 and 62-ish 2-arg, and Signer.verify_signature at signer.py:227, 2-arg but different receiver type). This entry targets specifically Signer.verify_signature (this-level, called as self.verify_signature(value, sig) with no key argument). `rg -n \"verify_signature\\(\" src/` returns 4 definitions plus 2 call sites: signer.py:239 `self.algorithm.verify_signature(key, value, sig)` (3-arg, targets the SigningAlgorithm family - a different symbol, excluded here, mirrors itsdangerous-02/03's get_signature split) and signer.py:253 `if self.verify_signature(value, sig):` inside Signer.unsign (2-arg, this entry, real caller). A tool that cannot distinguish the 2-arg Signer-level call shape from the 3-arg SigningAlgorithm-level call shape will misattribute the caller at line 239 to this symbol.",
+        "reverification": null
+      }
+    },
+    {
+      "id": "itsdangerous-10",
+      "commit": "672971d66a2ef9f85151e53283113f33d642dabd",
+      "language": "python",
+      "difficulty": "easy",
+      "category": "simple",
+      "symbol": {
+        "name": "dump_payload",
+        "file": "src/itsdangerous/serializer.py",
+        "line": 271,
+        "kind": "method",
+        "owner": "Serializer"
+      },
+      "tasks": {
+        "callers": [
+          {
+            "file": "src/itsdangerous/url_safe.py",
+            "line": 55,
+            "enclosing_symbol": "URLSafeSerializerMixin.dump_payload",
+            "call_line": 56,
+            "note": "super().dump_payload(obj) - single inheritance, statically resolvable to this base implementation."
+          },
+          {
+            "file": "src/itsdangerous/serializer.py",
+            "line": 309,
+            "enclosing_symbol": "Serializer.dumps",
+            "call_line": 314
+          }
+        ],
+        "callees": [],
+        "impact": null
+      },
+      "verification": {
+        "verified_by": "claude-sonnet-5",
+        "verification_date": "2026-09-01",
+        "verification_method": "Direct reading of source files via the Read tool, with ripgrep used only to enumerate candidate line numbers (never corbel) which were then individually opened and read in context to confirm each is a real call and to identify its enclosing function. corbel was never executed to produce any answer in this file. Draft candidates and caller lists were first generated by benchmarks/goldenset/lsp_to_draft.py (pyright / rust-analyzer), then every caller line was independently cross-checked against ripgrep output and manually read before being accepted or rejected.",
+        "verification_note": "dump_payload is overridden once, by URLSafeSerializerMixin.dump_payload (url_safe.py:55), which calls the base implementation via `super().dump_payload(obj)` at url_safe.py:56 - resolvable with certainty since URLSafeSerializerMixin's MRO puts Serializer directly above it and Python's super() is not duck-typed. The other real caller, serializer.py:314 (`payload = want_bytes(self.dump_payload(obj))` inside Serializer.dumps), is a same-class call. `rg -n \"dump_payload\\(\" src/` returns exactly the 2 definitions plus these 2 call sites.",
+        "reverification": null
+      }
+    },
+    {
+      "id": "itsdangerous-11",
+      "commit": "672971d66a2ef9f85151e53283113f33d642dabd",
+      "language": "python",
+      "difficulty": "adversarial",
+      "category": "dynamic_dispatch",
+      "symbol": {
+        "name": "__init__",
+        "file": "src/itsdangerous/signer.py",
+        "line": 129,
+        "kind": "method",
+        "owner": "Signer"
+      },
+      "tasks": {
+        "callees": {
+          "ambiguous": true,
+          "ground_truth": [
+            {
+              "name": "__init__",
+              "note": "Serializer.make_signer (serializer.py:278-285) constructs the active signer as `self.signer(self.secret_keys, salt=salt, **self.signer_kwargs)` at serializer.py:285, where `self.signer: type[Signer]` is a class attribute set from the `signer` constructor parameter (default `Signer`, serializer.py:99 `default_signer: type[Signer] = Signer`; overridable per-Serializer-instance). The call `self.signer(...)` is a constructor call on a type held in a variable, not a textual `Signer(` or `.__init__(` anywhere in the source - no name-based or AST call-site search targeting the literal identifier `__init__` or `Signer` will find serializer.py:285 as a call to this symbol. Within this repository specifically, the only two classes ever assigned to `self.signer` are `Signer` itself and `TimestampSigner` (timed.py:22), and TimestampSigner defines no `__init__` of its own, so in practice both possible runtime classes execute this exact Signer.__init__ - but that is an accident of this codebase's current class hierarchy, not something provable from the call site at serializer.py:285 alone (a third-party subclass with its own __init__ passed via the public `signer=` constructor argument would silently redirect it)."
+            }
+          ]
+        }
+      },
+      "verification": {
+        "verified_by": "claude-sonnet-5",
+        "verification_date": "2026-09-01",
+        "verification_method": "Direct reading of source files via the Read tool, with ripgrep used only to enumerate candidate line numbers (never corbel) which were then individually opened and read in context to confirm each is a real call and to identify its enclosing function. corbel was never executed to produce any answer in this file. Draft candidates and caller lists were first generated by benchmarks/goldenset/lsp_to_draft.py (pyright / rust-analyzer), then every caller line was independently cross-checked against ripgrep output and manually read before being accepted or rejected.",
+        "verification_note": "ADVERSARIAL. `rg -n \"Signer\\(\" src/` and `rg -n \"__init__\\(\" src/` both return zero real construction call sites for this class anywhere in itsdangerous's own source - Signer is never instantiated by its literal class name in-tree. The only place a Signer (or Signer subclass) is actually constructed is serializer.py:285's `self.signer(self.secret_keys, salt=salt, **self.signer_kwargs)`, where `self.signer` is a `type[Signer]` class attribute assigned from a constructor parameter (serializer.py:99,225). This is genuine config-driven dynamic dispatch on which was flagged during hand-verification (not by the mechanical scanner, whose adversarial_flags only fired 'dunder_name' on this candidate) and is the itsdangerous counterpart to corbel-05's Rust dyn-trait dispatch and itsdangerous-03's self.algorithm duck typing: the callee is real, its target set is knowable, but the call site never mentions the callee's name.",
+        "reverification": null
+      }
     }
   ]
 }

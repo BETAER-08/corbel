@@ -1,5 +1,6 @@
 [workspace]
 members = ["crates/corbel-core", "crates/corbel-lang", "crates/corbel"]
+exclude = ["benchmarks/repos/hyperfine", "benchmarks/repos/itsdangerous"]
 resolver = "3"
 
 [workspace.package]
