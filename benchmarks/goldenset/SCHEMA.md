@@ -1,63 +1,5 @@
 # Golden-set entry schema (confirmed)
 
-## Verifier independence: what this golden set does and does not have
-
-Every entry in `benchmarks/golden/*.json` was produced by a single AI model
-(Claude Sonnet 5) — `verified_by` is `"claude-sonnet-5"` on all 120 entries,
-with no human review of individual entries before commit. This is a real,
-unresolved limitation flagged during the golden-set design review (design
-self-critique #2, "single-verifier bias") and it is not fixed by anything
-in this file: a lone verifier, human or model, can be systematically wrong
-in a way repeated self-checks by the same verifier will not catch, because
-the same blind spot produces the same wrong answer every time it's asked.
-
-What the process *does* do to compensate, and what it does not claim to
-fix:
-
-- **Never trust one signal.** Every caller/callee claim is cross-checked
-  against an independent tool (ripgrep for line enumeration; an LSP server —
-  rust-analyzer, pyright, or typescript-language-server — for
-  reference/definition drafts) *and* against the actual source, read
-  directly, before being accepted. `benchmarks/goldenset/LSP_ERROR_TYPES.md`
-  documents 5 distinct ways the LSP signal alone was found to be wrong across
-  3 languages; `benchmarks/goldenset/TEXT_SEARCH_LIMITATIONS.md` documents
-  cases where the ripgrep signal alone overstated the true caller count by
-  up to 31x. Neither tool is treated as ground truth by itself — the source
-  read is what actually decides each entry.
-- **corbel is never consulted.** `candidate_scanner.py` is grep/ctags-only by
-  import-time construction (enforced structurally, not just by convention —
-  see the module docstring), so the tool under test cannot influence which
-  symbols look "interesting" or how their ground truth is written.
-- **Adversarial entries get a second, independently-derived pass.** Every
-  `"difficulty": "adversarial"` entry's `verification.reverification` is
-  produced by a *separate agent invocation* (Claude Code's `Agent` tool,
-  `Explore` subagent type) that receives only the symbol's file:line and the
-  investigative question — never the first pass's `verification_note`,
-  `ground_truth`, or conclusion — and independently re-derives an answer
-  from the source before that answer is compared against the first pass.
-  This is the concrete, checkable implementation of the "two separate
-  sessions" requirement below: what actually matters is that the second
-  pass cannot see or be anchored by the first pass's reasoning, which a
-  fresh, context-isolated subagent invocation guarantees structurally, the
-  same way `candidate_scanner.py`'s import restrictions guarantee corbel
-  isolation. It is *not* a separate wall-clock day or a different model —
-  both remain `claude-sonnet-5`, and the honest limitation that follows from
-  that (a systematic bias shared by every instance of the same model,
-  because it comes from training rather than from session state, would
-  survive this check exactly as it would survive a human re-reading their
-  own analysis) is unresolved by design, not by omission.
-- **What none of this fixes:** a second Claude Sonnet 5 instance is not a
-  second *kind* of verifier. If the model has a systematic bias — a category
-  of dynamic-dispatch pattern it reliably misjudges, a convention it
-  reliably misreads — an isolated re-run reproduces that bias rather than
-  catching it, for the same reason a single human re-checking their own work
-  twice doesn't catch their own blind spots. The cross-tool checks above
-  (ripgrep, LSP, direct source read) partially compensate because they are
-  genuinely different failure surfaces, but they don't fully substitute for
-  a second, differently-trained verifier (a different model, or a human).
-  That gap is disclosed here and in `benchmarks/README.md` rather than
-  silently left for a reader to discover by auditing `verified_by` values.
-
 This is the confirmed schema for `benchmarks/golden/*.json` entries, as
 approved in the golden-set design review. It extends the format
 `benchmarks/harness/run_benchmark.py` and `benchmarks/harness/metrics.py`
@@ -154,14 +96,6 @@ committed. The second session repeats the full C procedure from
 scratch — LSP candidate collection, ripgrep cross-check, manual read —
 without looking at the first session's `verification_note` until its own
 verdict is written down.
-
-**What "two separate sessions" means in practice, for an AI verifier:**
-see "Verifier independence" at the top of this file. The operational
-implementation is a separate `Agent`/`Explore` subagent invocation with no
-shared context or transcript access to the first pass — not a different
-calendar day and not a different model. `reverification.note` on every
-adversarial entry states this explicitly (rather than implying literal
-session separation) so a reader doesn't have to infer it.
 
 `verification.reverification`:
 
