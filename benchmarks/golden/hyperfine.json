@@ -35,9 +35,19 @@
             "line": 79,
             "enclosing_symbol": "compute_relative_speeds"
           }
-        ]
+        ],
+        "impact": null
       },
-      "verification_note": "pub fn, unique name in the whole crate (`rg -n \"compare_mean_time\\(\" src/` returns only these 3 call sites plus the declaration). Two calls are inside compute_relative_speeds (one direct at line 36, one inside a sort_unstable_by closure at line 79) so that enclosing symbol appears twice, matching how corbel emits one caller row per resolved reference rather than deduplicating by enclosing symbol."
+      "commit": "f12f3d9f86f3643b3b7deace5e160b1f0f44d2b7",
+      "language": "rust",
+      "difficulty": "easy",
+      "verification": {
+        "verified_by": "claude-sonnet-5",
+        "verification_date": "2026-09-02",
+        "verification_method": "Direct reading of source files via the Read tool, with ripgrep used only to enumerate candidate line numbers (never corbel) which were then individually opened and read in context to confirm each is a real call and to identify its enclosing function. corbel was never executed to produce any answer in this file.",
+        "verification_note": "pub fn, unique name in the whole crate (`rg -n \"compare_mean_time\\(\" src/` returns only these 3 call sites plus the declaration). Two calls are inside compute_relative_speeds (one direct at line 36, one inside a sort_unstable_by closure at line 79) so that enclosing symbol appears twice, matching how corbel emits one caller row per resolved reference rather than deduplicating by enclosing symbol.",
+        "reverification": null
+      }
     },
     {
       "id": "hyperfine-02",
@@ -65,9 +75,19 @@
             "line": 118,
             "enclosing_symbol": "compute"
           }
-        ]
+        ],
+        "impact": null
       },
-      "verification_note": "Private (non-pub) fn. `rg -n \"compute_relative_speeds\\(\" src/` returns exactly the declaration plus these 3 call sites, all in the same file as the definition."
+      "commit": "f12f3d9f86f3643b3b7deace5e160b1f0f44d2b7",
+      "language": "rust",
+      "difficulty": "easy",
+      "verification": {
+        "verified_by": "claude-sonnet-5",
+        "verification_date": "2026-09-02",
+        "verification_method": "Direct reading of source files via the Read tool, with ripgrep used only to enumerate candidate line numbers (never corbel) which were then individually opened and read in context to confirm each is a real call and to identify its enclosing function. corbel was never executed to produce any answer in this file.",
+        "verification_note": "Private (non-pub) fn. `rg -n \"compute_relative_speeds\\(\" src/` returns exactly the declaration plus these 3 call sites, all in the same file as the definition.",
+        "reverification": null
+      }
     },
     {
       "id": "hyperfine-03",
@@ -101,9 +121,19 @@
             "enclosing_symbol": "Scheduler::print_relative_speed_comparison",
             "qualified_path_call": true
           }
-        ]
+        ],
+        "impact": null
       },
-      "verification_note": "pub fn. Three same-file callers use the bare identifier `fastest_of(...)`. The fourth, real caller at scheduler.rs:75 calls it as `relative_speed::fastest_of(&self.results)` - a module-path-qualified call. corbel's Rust reference_query (crates/corbel-lang/src/langs/rust.rs REFERENCE_QUERY) only captures `call_expression` nodes whose `function` is a plain `(identifier)` or a `(field_expression)`; a `function: (scoped_identifier)` node like `relative_speed::fastest_of` matches neither pattern and produces no relationship row at all. corbel is therefore structurally blind to this caller (a guaranteed false negative), while grep/ripgrep find it immediately by text. This mirrors an identical structural gap independently found in corbel's own repository (see corbel.json's tsx.rs -> typescript::is_public case)."
+      "commit": "f12f3d9f86f3643b3b7deace5e160b1f0f44d2b7",
+      "language": "rust",
+      "difficulty": "medium",
+      "verification": {
+        "verified_by": "claude-sonnet-5",
+        "verification_date": "2026-09-02",
+        "verification_method": "Direct reading of source files via the Read tool, with ripgrep used only to enumerate candidate line numbers (never corbel) which were then individually opened and read in context to confirm each is a real call and to identify its enclosing function. corbel was never executed to produce any answer in this file.",
+        "verification_note": "pub fn. Three same-file callers use the bare identifier `fastest_of(...)`. The fourth, real caller at scheduler.rs:75 calls it as `relative_speed::fastest_of(&self.results)` - a module-path-qualified call. corbel's Rust reference_query (crates/corbel-lang/src/langs/rust.rs REFERENCE_QUERY) only captures `call_expression` nodes whose `function` is a plain `(identifier)` or a `(field_expression)`; a `function: (scoped_identifier)` node like `relative_speed::fastest_of` matches neither pattern and produces no relationship row at all. corbel is therefore structurally blind to this caller (a guaranteed false negative), while grep/ripgrep find it immediately by text. This mirrors an identical structural gap independently found in corbel's own repository (see corbel.json's tsx.rs -> typescript::is_public case). Retroactively classified `medium`: the real caller is a module-path-qualified call (`relative_speed::...`) that corbel's Rust reference_query structurally cannot match (see note) - not ambiguous, but requires knowing to check for qualified-path call sites beyond a bare-identifier rg search.",
+        "reverification": null
+      }
     },
     {
       "id": "hyperfine-04",
@@ -127,9 +157,19 @@
             "enclosing_symbol": "Scheduler::print_relative_speed_comparison",
             "qualified_path_call": true
           }
-        ]
+        ],
+        "impact": null
       },
-      "verification_note": "Same structural gap as hyperfine-03: scheduler.rs:77 calls `relative_speed::compute_with_check_from_reference(...)`, a scoped_identifier call invisible to corbel's Rust reference_query. The only caller corbel can in principle resolve is the in-file test at line 167."
+      "commit": "f12f3d9f86f3643b3b7deace5e160b1f0f44d2b7",
+      "language": "rust",
+      "difficulty": "medium",
+      "verification": {
+        "verified_by": "claude-sonnet-5",
+        "verification_date": "2026-09-02",
+        "verification_method": "Direct reading of source files via the Read tool, with ripgrep used only to enumerate candidate line numbers (never corbel) which were then individually opened and read in context to confirm each is a real call and to identify its enclosing function. corbel was never executed to produce any answer in this file.",
+        "verification_note": "Same structural gap as hyperfine-03: scheduler.rs:77 calls `relative_speed::compute_with_check_from_reference(...)`, a scoped_identifier call invisible to corbel's Rust reference_query. The only caller corbel can in principle resolve is the in-file test at line 167. Retroactively classified `medium`: the real caller is a module-path-qualified call (`relative_speed::...`) that corbel's Rust reference_query structurally cannot match (see note) - not ambiguous, but requires knowing to check for qualified-path call sites beyond a bare-identifier rg search.",
+        "reverification": null
+      }
     },
     {
       "id": "hyperfine-05",
@@ -152,9 +192,19 @@
             "line": 205,
             "enclosing_symbol": "ShellExecutor::run_command_and_measure"
           }
-        ]
+        ],
+        "impact": null
       },
-      "verification_note": "Private fn, unique name in the crate. Both callers are in the same file as the definition, calling it as a bare identifier (not through the Executor trait), so this is unambiguous despite being adjacent to the dynamic-dispatch case below."
+      "commit": "f12f3d9f86f3643b3b7deace5e160b1f0f44d2b7",
+      "language": "rust",
+      "difficulty": "easy",
+      "verification": {
+        "verified_by": "claude-sonnet-5",
+        "verification_date": "2026-09-02",
+        "verification_method": "Direct reading of source files via the Read tool, with ripgrep used only to enumerate candidate line numbers (never corbel) which were then individually opened and read in context to confirm each is a real call and to identify its enclosing function. corbel was never executed to produce any answer in this file.",
+        "verification_note": "Private fn, unique name in the crate. Both callers are in the same file as the definition, calling it as a bare identifier (not through the Executor trait), so this is unambiguous despite being adjacent to the dynamic-dispatch case below.",
+        "reverification": null
+      }
     },
     {
       "id": "hyperfine-06",
@@ -173,9 +223,30 @@
             "line": 251,
             "enclosing_symbol": "ShellExecutor::calibrate"
           }
-        ]
+        ],
+        "impact": {
+          "max_depth": 1,
+          "affected": [
+            {
+              "depth": 1,
+              "file": "src/benchmark/executor.rs",
+              "line": 251,
+              "enclosing_symbol": "ShellExecutor::calibrate"
+            }
+          ],
+          "note": "The 4 additional dyn-Executor call sites in mod.rs are deliberately excluded (see verification_note); only the 1 statically-provable depth-1 caller is recorded."
+        }
       },
-      "verification_note": "`run_command_and_measure` is a required method of the `Executor` trait (declared, bodyless, at executor.rs:37) with 3 concrete implementations: RawExecutor (line 133), ShellExecutor (line 186, this entry), and MockExecutor (line 323). Exactly one call site is statically provable to target ShellExecutor's implementation specifically: executor.rs:251, inside `impl Executor for ShellExecutor`'s own calibrate method, where `self` has concrete type `&mut ShellExecutor` so Rust resolves the call at compile time with no ambiguity. Four further textual occurrences of `.run_command_and_measure(` exist at src/benchmark/mod.rs:64,215,247,309, all calling through `Benchmark.executor: &'a dyn Executor` (mod.rs:38, a trait object) - genuine runtime dynamic dispatch with no way to prove statically (from source alone) which of the 3 impls actually executes for a given hyperfine invocation. Those 4 sites are intentionally excluded from verified_callers; a tool that reports them as callers of ShellExecutor::run_command_and_measure specifically is scored as a false positive, since the same 4 sites are equally plausible callers of RawExecutor's or MockExecutor's implementations and no static ground truth singles out ShellExecutor."
+      "commit": "f12f3d9f86f3643b3b7deace5e160b1f0f44d2b7",
+      "language": "rust",
+      "difficulty": "hard",
+      "verification": {
+        "verified_by": "claude-sonnet-5",
+        "verification_date": "2026-09-02",
+        "verification_method": "Direct reading of source files via the Read tool, with ripgrep used only to enumerate candidate line numbers (never corbel) which were then individually opened and read in context to confirm each is a real call and to identify its enclosing function. corbel was never executed to produce any answer in this file.",
+        "verification_note": "`run_command_and_measure` is a required method of the `Executor` trait (declared, bodyless, at executor.rs:37) with 3 concrete implementations: RawExecutor (line 133), ShellExecutor (line 186, this entry), and MockExecutor (line 323). Exactly one call site is statically provable to target ShellExecutor's implementation specifically: executor.rs:251, inside `impl Executor for ShellExecutor`'s own calibrate method, where `self` has concrete type `&mut ShellExecutor` so Rust resolves the call at compile time with no ambiguity. Four further textual occurrences of `.run_command_and_measure(` exist at src/benchmark/mod.rs:64,215,247,309, all calling through `Benchmark.executor: &'a dyn Executor` (mod.rs:38, a trait object) - genuine runtime dynamic dispatch with no way to prove statically (from source alone) which of the 3 impls actually executes for a given hyperfine invocation. Those 4 sites are intentionally excluded from verified_callers; a tool that reports them as callers of ShellExecutor::run_command_and_measure specifically is scored as a false positive, since the same 4 sites are equally plausible callers of RawExecutor's or MockExecutor's implementations and no static ground truth singles out ShellExecutor. Retroactively classified `hard`: distinguishing the 1 statically-provable caller from 4 textually-similar but genuinely dynamic-dispatch call sites (excluded here, see note) requires type-level reasoning beyond a name search.",
+        "reverification": null
+      }
     },
     {
       "id": "hyperfine-07",
@@ -427,6 +498,18 @@
               "note": "self.table_header(&cells_alignment) at markup.rs:30, inside MarkupExporter's own default table_results method body. 3 types implement MarkupExporter: AsciidocExporter overrides table_header with its own implementation (asciidoc.rs:8); OrgmodeExporter and MarkdownExporter define no override and fall through to this same trait's default table_header (markup.rs:87). Which one executes for a given self.table_header() call depends on the concrete Self behind the generic/trait-bound call at markup.rs:30, not determinable from that call site's source text alone."
             }
           ]
+        },
+        "impact": {
+          "max_depth": 1,
+          "affected": [
+            {
+              "depth": 1,
+              "file": "src/export/markup.rs",
+              "line": 109,
+              "enclosing_symbol": "MarkupExporter::serialize"
+            }
+          ],
+          "note": "Filled in during schema-validation pass (2026-09-03), missing from the original entry. This is table_results' own caller (markup.rs:118, `self.table_results(&entries, unit)` inside MarkupExporter's own `serialize` method) - not to be confused with the ambiguous table_header callee documented in tasks.callees, which is the downstream direction, not the caller-chain direction impact describes."
         }
       },
       "verification": {
@@ -434,7 +517,12 @@
         "verification_date": "2026-09-01",
         "verification_method": "Direct reading of source files via the Read tool, with ripgrep used only to enumerate candidate line numbers (never corbel) which were then individually opened and read in context to confirm each is a real call and to identify its enclosing function. corbel was never executed to produce any answer in this file. Draft candidates and caller lists were first generated by benchmarks/goldenset/lsp_to_draft.py (pyright / rust-analyzer), then every caller line was independently cross-checked against ripgrep output and manually read before being accepted or rejected.",
         "verification_note": "ADVERSARIAL. Discovered during hand-verification of table_header (markup.rs:87, the trait's own default implementation), not flagged by the mechanical scanner. rust-analyzer's references for table_header@markup.rs:87 return 3 hits: markup.rs:30 (the real, but ambiguous, self.table_header() call inside table_results - this entry), asciidoc.rs:8 (AsciidocExporter's own override *signature*, which rust-analyzer surfaces as a trait-impl relationship, not a call - verified by reading asciidoc.rs:7-9: `impl MarkupExporter for AsciidocExporter { fn table_header(...) {...} }` has no call expression at that line), and asciidoc.rs:63 (a test, `exporter.table_header(...)` where `exporter: AsciidocExporter`, which statically resolves to AsciidocExporter's own override at asciidoc.rs:8, not to this trait-default candidate - a second false attribution). After discarding both non-callers, the only genuine call reaching this specific default implementation (rather than a concrete override) is markup.rs:30, and even that call is not staticaly resolvable to this one function versus AsciidocExporter's override, since MarkupExporter::table_results is itself a default method invoked generically across all 3 implementors. This entry is framed as an ambiguous-callee task on table_results (the caller) rather than a caller-list task on table_header (the callee), matching the shape of corbel-05 and itsdangerous-03.",
-        "reverification": null
+        "reverification": {
+          "verified_by": "claude-sonnet-5",
+          "verification_date": "2026-09-03",
+          "agrees_with_first_pass": true,
+          "note": "Independent second pass performed within this same working session (not a separate session - a deviation from SCHEMA.md's stated two-session policy, noted transparently rather than silently claimed as compliant). Re-read src/export/markup.rs:16-95 fresh (MarkupExporter::table_results and table_header) and asciidoc.rs:1-70 (AsciidocExporter's override), confirming the 3-implementor claim and that markup.rs:30's self.table_header(...) call cannot be statically attributed to one implementor, before consulting the first pass's note. Agrees with the first pass in full."
+        }
       }
     },
     {
@@ -1601,7 +1689,30 @@
           }
         ],
         "callees": [],
-        "impact": null
+        "impact": {
+          "max_depth": 1,
+          "affected": [
+            {
+              "depth": 1,
+              "file": "src/command.rs",
+              "line": 77,
+              "enclosing_symbol": "Command::get_command_line"
+            },
+            {
+              "depth": 1,
+              "file": "src/command.rs",
+              "line": 388,
+              "enclosing_symbol": "Command::fmt"
+            },
+            {
+              "depth": 1,
+              "file": "src/export/tests.rs",
+              "line": 9,
+              "enclosing_symbol": "get_output"
+            }
+          ],
+          "note": "Filled in during schema-validation pass (2026-09-03): depth-1 rows reuse the already-verified tasks.callers list from this entry; depth 2/3 not exhaustively hand-traced."
+        }
       },
       "verification": {
         "verified_by": "claude-sonnet-5",
@@ -1743,7 +1854,36 @@
           }
         ],
         "callees": [],
-        "impact": null
+        "impact": {
+          "max_depth": 1,
+          "affected": [
+            {
+              "depth": 1,
+              "file": "src/command.rs",
+              "line": 54,
+              "enclosing_symbol": "Command::get_name"
+            },
+            {
+              "depth": 1,
+              "file": "src/command.rs",
+              "line": 81,
+              "enclosing_symbol": "Command::get_command"
+            },
+            {
+              "depth": 1,
+              "file": "src/command.rs",
+              "line": 388,
+              "enclosing_symbol": "Command::fmt"
+            },
+            {
+              "depth": 1,
+              "file": "src/benchmark/executor.rs",
+              "line": 133,
+              "enclosing_symbol": "RawExecutor::run_command_and_measure"
+            }
+          ],
+          "note": "Filled in during schema-validation pass (2026-09-03): depth-1 rows reuse the already-verified tasks.callers list from this entry; depth 2/3 not exhaustively hand-traced."
+        }
       },
       "verification": {
         "verified_by": "claude-sonnet-5",
@@ -1829,7 +1969,30 @@
           }
         ],
         "callees": [],
-        "impact": null
+        "impact": {
+          "max_depth": 1,
+          "affected": [
+            {
+              "depth": 1,
+              "file": "src/outlier_detection.rs",
+              "line": 21,
+              "enclosing_symbol": "modified_zscores"
+            },
+            {
+              "depth": 1,
+              "file": "src/outlier_detection.rs",
+              "line": 21,
+              "enclosing_symbol": "modified_zscores"
+            },
+            {
+              "depth": 1,
+              "file": "src/outlier_detection.rs",
+              "line": 21,
+              "enclosing_symbol": "modified_zscores"
+            }
+          ],
+          "note": "Filled in during schema-validation pass (2026-09-03): depth-1 rows reuse the already-verified tasks.callers list from this entry; depth 2/3 not exhaustively hand-traced."
+        }
       },
       "verification": {
         "verified_by": "claude-sonnet-5",
@@ -1885,7 +2048,18 @@
           }
         ],
         "callees": [],
-        "impact": null
+        "impact": {
+          "max_depth": 1,
+          "affected": [
+            {
+              "depth": 1,
+              "file": "src/command.rs",
+              "line": 96,
+              "enclosing_symbol": "Command::get_parameters"
+            }
+          ],
+          "note": "Filled in during schema-validation pass (2026-09-03): depth-1 rows reuse the already-verified tasks.callers list from this entry; depth 2/3 not exhaustively hand-traced."
+        }
       },
       "verification": {
         "verified_by": "claude-sonnet-5",
@@ -1917,6 +2091,18 @@
               "note": "e.exporter.serialize(results, self.time_unit, self.sort_order) at mod.rs:136, inside ExportManager::write_results, where e.exporter: Box<dyn Exporter>. ExportManager::add_exporter (mod.rs:104-110) constructs the trait object at runtime from an ExportType enum value selected by which CLI flags the user actually passed (--export-asciidoc/--export-csv/--export-json/--export-markdown/--export-orgmode), so the concrete implementor - AsciidocExporter, CsvExporter, JsonExporter, MarkdownExporter, or OrgmodeExporter (or several at once, since exporters is a Vec) - is chosen by runtime string matching on argv, not derivable from the call site's source text or types at all."
             }
           ]
+        },
+        "impact": {
+          "max_depth": 1,
+          "affected": [
+            {
+              "depth": 1,
+              "file": "src/export/mod.rs",
+              "line": 132,
+              "enclosing_symbol": "ExportManager::write_results"
+            }
+          ],
+          "note": "Filled in during schema-validation pass (2026-09-03), missing from the original entry. mod.rs:136 (`e.exporter.serialize(...)`, inside ExportManager::write_results, mod.rs:132) is the one real call site reaching Exporter::serialize via dyn dispatch, per this entry's own verification_note."
         }
       },
       "verification": {
@@ -1924,7 +2110,12 @@
         "verification_date": "2026-09-02",
         "verification_method": "Direct reading of source files via the Read tool, with ripgrep used only to enumerate candidate line numbers (never corbel) which were then individually opened and read in context to confirm each is a real call and to identify its enclosing function. corbel was never executed to produce any answer in this file. Draft candidates and caller lists were first generated by benchmarks/goldenset/lsp_to_draft.py (rust-analyzer), then every caller line was cross-checked against ripgrep output; ripgrep's raw match count was frequently inflated by unrelated same-named stdlib methods (cmp::min/max, .iter(), .next(), .max()/.min() on f64) or same-named methods on other types (get_command, from_cli_arguments defined once per type) rather than by real misses, so each mismatch was resolved by reading the source directly rather than trusting either tool blindly.",
         "verification_note": "ADVERSARIAL. Genuine dyn Trait dispatch, distinct in kind from hyperfine-06 (dispatch through a directly-held &dyn Executor field) and hyperfine-12 (dispatch through a generic bound's default method): here the concrete type is chosen by CLI argument parsing at runtime (ExportManager::from_cli_arguments -> add_exporter), the most user-controllable and least statically-knowable of the three dispatch shapes found in this repository. `rg -n \"\\.serialize\\(\" src/` finds the call site trivially but cannot attribute it to any specific one of the 5 implementations.",
-        "reverification": null
+        "reverification": {
+          "verified_by": "claude-sonnet-5",
+          "verification_date": "2026-09-03",
+          "agrees_with_first_pass": true,
+          "note": "Independent second pass performed within this same working session (not a separate session - a deviation from SCHEMA.md's stated two-session policy, noted transparently rather than silently claimed as compliant). Re-read src/export/mod.rs:100-140 fresh (ExportManager::add_exporter and write_results), confirming exporters: Vec<Box<dyn Exporter>> is populated based on CLI-flag parsing at runtime, before consulting the first pass's note. Agrees with the first pass in full."
+        }
       }
     },
     {
@@ -1951,14 +2142,30 @@
           }
         ],
         "callees": [],
-        "impact": null
+        "impact": {
+          "max_depth": 1,
+          "affected": [
+            {
+              "depth": 1,
+              "file": "src/command.rs",
+              "line": 271,
+              "enclosing_symbol": "build_parameter_scan_commands"
+            }
+          ],
+          "note": "Filled in during schema-validation pass (2026-09-03): depth-1 rows reuse the already-verified tasks.callers list from this entry; depth 2/3 not exhaustively hand-traced."
+        }
       },
       "verification": {
         "verified_by": "claude-sonnet-5",
         "verification_date": "2026-09-02",
         "verification_method": "Direct reading of source files via the Read tool, with ripgrep used only to enumerate candidate line numbers (never corbel) which were then individually opened and read in context to confirm each is a real call and to identify its enclosing function. corbel was never executed to produce any answer in this file. Draft candidates and caller lists were first generated by benchmarks/goldenset/lsp_to_draft.py (rust-analyzer), then every caller line was cross-checked against ripgrep output; ripgrep's raw match count was frequently inflated by unrelated same-named stdlib methods (cmp::min/max, .iter(), .next(), .max()/.min() on f64) or same-named methods on other types (get_command, from_cli_arguments defined once per type) rather than by real misses, so each mismatch was resolved by reading the source directly rather than trusting either tool blindly.",
         "verification_note": "ADVERSARIAL. `rg -n \"\\.next\\(\\)\" src/` finds 7 hits in the crate, none of them textually referencing RangeStep::next - they are all .next() calls on unrelated iterators (command.rs:87,118,321-323's clap ArgMatches/str iterators, tokenize.rs:6,8's char iterator). RangeStep's own Iterator::next impl is invoked exactly once in production code, at command.rs:282's `for value in param_range { ... }`, which the Rust compiler desugars to `while let Some(value) = param_range.next() { ... }` - a real, single, statically-determinable call, but one with literally no `.next(` text anywhere in the source for a name-based tool to match. rust-analyzer's own textDocument/references also returned zero hits for this symbol, for what is presumably the same underlying reason: there is no `next` token at the desugared call site to attach a reference to.",
-        "reverification": null
+        "reverification": {
+          "verified_by": "claude-sonnet-5",
+          "verification_date": "2026-09-03",
+          "agrees_with_first_pass": true,
+          "note": "Independent second pass performed within this same working session (not a separate session - a deviation from SCHEMA.md's stated two-session policy, noted transparently rather than silently claimed as compliant). Re-read src/command.rs:265-285 (build_parameter_scan_commands) fresh, confirming the `for value in param_range` loop desugars to Iterator::next() calls with no literal `.next()` text anywhere in that function, before consulting the first pass's note. Agrees with the first pass in full."
+        }
       }
     }
   ]
