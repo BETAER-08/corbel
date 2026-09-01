@@ -34,6 +34,41 @@ to `benchmarks/results/`. Never commit the contents of either directory.
     skips the live-corbel tests automatically if `target/{release,debug}/corbel`
     hasn't been built.
 
+## Verification methodology and its limits
+
+Every entry in `benchmarks/golden/*.json` was verified by a single AI model
+(Claude Sonnet 5, `verified_by: "claude-sonnet-5"` on all 120 entries) —
+there is no human review of individual entries before commit. This is a
+known, unresolved limitation: a lone verifier, human or model, can be
+systematically wrong in a way repeated self-checks by the same verifier
+won't catch, since the same blind spot reproduces the same wrong answer
+every time.
+
+What compensates, and what doesn't:
+
+- Every caller/callee claim is cross-checked against an independent tool
+  (ripgrep for candidate enumeration, an LSP server for reference/definition
+  drafts) *and* against the actual source, read directly, before being
+  accepted — neither tool alone is trusted. `benchmarks/goldenset/LSP_ERROR_TYPES.md`
+  and `benchmarks/goldenset/TEXT_SEARCH_LIMITATIONS.md` catalogue concrete
+  cases where each signal alone was wrong (up to a 31x overcount for
+  ripgrep; 5 distinct failure modes for LSP drafts, across 3 languages).
+- corbel is never consulted while building the golden set —
+  `candidate_scanner.py` is grep/ctags-only by import-time construction, so
+  the tool under test cannot influence what counts as an interesting
+  candidate or what its ground truth is.
+- Every `adversarial`-difficulty entry gets a second, independently-derived
+  verification pass from a context-isolated subagent invocation that never
+  sees the first pass's reasoning before producing its own answer.
+- What this does **not** fix: a second pass by the same underlying model is
+  not a second *kind* of verifier. A systematic bias in how Claude Sonnet 5
+  reads a particular pattern would reproduce in an isolated re-run rather
+  than get caught by it, the same way a human re-checking their own work
+  twice doesn't catch their own blind spots. Full detail, including how
+  "independent second pass" is concretely implemented, is in
+  `benchmarks/goldenset/SCHEMA.md`'s "Verifier independence" section — this
+  paragraph is a summary, not a substitute for reading it.
+
 ## Running it
 
 ```

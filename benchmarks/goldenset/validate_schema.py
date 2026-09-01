@@ -121,6 +121,14 @@ def validate_file(path: Path, repos_root: Path) -> tuple[list[str], Counter]:
                 if reverif is None:
                     errors.append(f"{path.name}:{eid}: adversarial entry missing verification.reverification")
                 else:
+                    reverif_note = reverif.get("note", "")
+                    if not any(kw in reverif_note for kw in ("subagent", "Agent", "isolated", "independent")):
+                        errors.append(
+                            f"{path.name}:{eid}: reverification.note doesn't state its independence "
+                            f"methodology (expected a mention of an isolated/independent subagent pass, "
+                            f"per SCHEMA.md's 'Verifier independence' section) - passing agrees_with_first_pass "
+                            f"alone doesn't establish HOW the second pass was kept independent of the first"
+                        )
                     if "agrees_with_first_pass" not in reverif:
                         errors.append(f"{path.name}:{eid}: reverification missing 'agrees_with_first_pass'")
                     elif reverif["agrees_with_first_pass"] is False and not reverif.get("note"):
