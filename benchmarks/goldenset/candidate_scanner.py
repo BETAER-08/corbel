@@ -105,7 +105,7 @@ class Candidate:
     adversarial_flags: list[str] = field(default_factory=list)
 
 
-def _run_ctags(repo_path: Path, language: str) -> list[Definition]:
+def _run_ctags(repo_path: Path, language: str, scope_subdir: str | None) -> list[Definition]:
     # universal-ctags auto-detects language per file and will happily index
     # e.g. Python helper scripts sitting inside a Rust repo (observed in
     # hyperfine/scripts/*.py) alongside the .rs sources. Restrict --languages
@@ -118,7 +118,13 @@ def _run_ctags(repo_path: Path, language: str) -> list[Definition]:
         "javascript": "JavaScript",
     }[language]
     ctags = _require("ctags")
-    cmd = [ctags, "-R", f"--languages={ctags_language}", "--fields=+znKe", "-f", "-", str(repo_path)]
+    # scope_subdir narrows *what ctags walks* (e.g. a single package inside a
+    # monorepo) while `file` values in the output stay relative to repo_path,
+    # not to the subdir - so downstream paths match what lsp_to_draft.py and
+    # the golden-file "search_root" convention expect (repo_path stays the
+    # LSP/tsconfig root; scope_subdir is a candidate-selection filter only).
+    scan_target = (repo_path / scope_subdir) if scope_subdir else repo_path
+    cmd = [ctags, "-R", f"--languages={ctags_language}", "--fields=+znKe", "-f", "-", str(scan_target)]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180, check=True)
     defs: list[Definition] = []
     for line in proc.stdout.splitlines():
@@ -210,8 +216,8 @@ def _difficulty(name_count: int, raw_caller_count: int) -> str:
     return "medium"
 
 
-def scan(repo_path: Path, language: str) -> list[Candidate]:
-    defs = _run_ctags(repo_path, language)
+def scan(repo_path: Path, language: str, scope_subdir: str | None = None) -> list[Candidate]:
+    defs = _run_ctags(repo_path, language, scope_subdir)
     by_name: dict[str, list[Definition]] = defaultdict(list)
     for d in defs:
         by_name[d.name].append(d)
@@ -250,12 +256,19 @@ def main() -> None:
     )
     parser.add_argument("repo_path", type=Path)
     parser.add_argument("--language", required=True, choices=sorted(EXT_FOR_LANGUAGE))
+    parser.add_argument(
+        "--scope-subdir",
+        default=None,
+        help="restrict candidate definitions to this subdir of repo_path (e.g. a single "
+        "package inside a monorepo); repo_path itself stays the path base for the "
+        "'file' field and for raw_caller_count's search, so it can stay the LSP/tsconfig root",
+    )
     parser.add_argument("--difficulty", choices=["easy", "medium", "hard"], default=None)
     parser.add_argument("--only-flagged", action="store_true", help="only print candidates with adversarial_flags")
     parser.add_argument("-o", "--output", type=Path, default=None)
     args = parser.parse_args()
 
-    candidates = scan(args.repo_path.resolve(), args.language)
+    candidates = scan(args.repo_path.resolve(), args.language, args.scope_subdir)
 
     if args.difficulty:
         candidates = [c for c in candidates if c.difficulty_guess == args.difficulty]

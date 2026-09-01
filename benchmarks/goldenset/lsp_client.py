@@ -101,25 +101,24 @@ class LspClient:
 
     # --- convenience ---------------------------------------------------
 
-    def initialize(self, root_path: Path) -> Any:
-        result = self.request(
-            "initialize",
-            {
-                "processId": None,
-                "rootUri": root_path.resolve().as_uri(),
-                "capabilities": {
-                    "workspace": {"symbol": {"dynamicRegistration": False}},
-                    "textDocument": {
-                        "references": {"dynamicRegistration": False},
-                        "documentSymbol": {
-                            "dynamicRegistration": False,
-                            "hierarchicalDocumentSymbolSupport": True,
-                        },
+    def initialize(self, root_path: Path, init_options: dict | None = None) -> Any:
+        params = {
+            "processId": None,
+            "rootUri": root_path.resolve().as_uri(),
+            "capabilities": {
+                "workspace": {"symbol": {"dynamicRegistration": False}},
+                "textDocument": {
+                    "references": {"dynamicRegistration": False},
+                    "documentSymbol": {
+                        "dynamicRegistration": False,
+                        "hierarchicalDocumentSymbolSupport": True,
                     },
                 },
             },
-            timeout=120,
-        )
+        }
+        if init_options is not None:
+            params["initializationOptions"] = init_options
+        result = self.request("initialize", params, timeout=120)
         self.notify("initialized", {})
         return result
 

@@ -251,6 +251,15 @@ def main() -> None:
         "before the first references/documentSymbol request; too short under-collects "
         "cross-file references silently",
     )
+    parser.add_argument(
+        "--tsserver-path",
+        default=None,
+        help="path to tsserver.js, passed as initializationOptions.tsserver.path for "
+        "typescript-language-server. Needed when the target repo has no local "
+        "node_modules/typescript (we deliberately don't run npm install against "
+        "cloned benchmark repos), since typescript-language-server otherwise fails "
+        "to find a TypeScript installation to drive.",
+    )
     args = parser.parse_args()
 
     repo_path = args.repo_path.resolve()
@@ -263,8 +272,9 @@ def main() -> None:
         print(f"error: no default LSP command for {args.language}; pass --lsp-cmd", file=sys.stderr)
         sys.exit(1)
 
+    init_options = {"tsserver": {"path": args.tsserver_path}} if args.tsserver_path else None
     client = LspClient(lsp_cmd, cwd=repo_path)
-    client.initialize(repo_path)
+    client.initialize(repo_path, init_options=init_options)
     opened = _open_whole_workspace(client, repo_path, args.language)
     print(f"opened {opened} files; waiting {args.warmup_seconds}s for workspace indexing...", file=sys.stderr)
     time.sleep(args.warmup_seconds)
