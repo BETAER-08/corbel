@@ -109,6 +109,21 @@ def _find_innermost(symbols: list[dict], pos: dict, parent: dict | None = None):
 _RUST_IMPL_FOR = re.compile(r"^impl(?:<[^>]*>)?\s+[\w:]+(?:<[^>]*>)?\s+for\s+([\w:]+)")
 _RUST_IMPL_PLAIN = re.compile(r"^impl(?:<[^>]*>)?\s+([\w:]+)")
 
+# LSP SymbolKind values (see the LSP spec) for constructs that can actually
+# contain a call expression in their body. A reference whose innermost
+# containing documentSymbol is anything else (Module=2, Namespace=3,
+# Class=5, Interface=11, ...) is not inside a function body at all - most
+# commonly a `use`/`import` statement that happens to sit inside a module
+# block (e.g. `mod tests { use foo::bar; ... }` in Rust), which still gets
+# a non-None enclosing symbol from a naive containment walk even though it
+# is not a call site. Top-level imports outside any module already produce
+# None correctly; this closes the same gap for imports nested one level in.
+_CALLABLE_SYMBOL_KINDS = {6, 9, 12}  # Method, Constructor, Function
+
+
+def _is_callable_kind(sym: dict) -> bool:
+    return sym.get("kind") in _CALLABLE_SYMBOL_KINDS
+
 
 def _owner_name(parent_name: str, language: str) -> str:
     """rust-analyzer's documentSymbol names an impl block's container
@@ -171,7 +186,7 @@ def draft_entry(
         symbols = doc_symbol_cache[ref_uri]
 
         found = _find_innermost(symbols, ref_pos)
-        if found is None:
+        if found is None or not _is_callable_kind(found[0]):
             callers.append(
                 {
                     "file": ref_rel,
