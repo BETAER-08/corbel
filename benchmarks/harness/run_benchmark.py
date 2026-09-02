@@ -51,6 +51,8 @@ def task_ground_truth(task_value):
 
 
 def bare_name(qualified_name):
+    if qualified_name is None:
+        return None
     for sep in ("::", "."):
         if sep in qualified_name:
             return qualified_name.rsplit(sep, 1)[-1]
