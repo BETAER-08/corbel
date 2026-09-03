@@ -44,11 +44,11 @@ cargo install corbel
 Pre-built binaries are produced by [cargo-dist](https://github.com/axodotdev/cargo-dist) shell and PowerShell installers on tagged releases:
 
 ```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/trybetaer/corbel/releases/latest/download/corbel-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/BETAER-08/corbel/releases/latest/download/corbel-installer.sh | sh
 ```
 
 ```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://github.com/trybetaer/corbel/releases/latest/download/corbel-installer.ps1 | iex"
+powershell -ExecutionPolicy ByPass -c "irm https://github.com/BETAER-08/corbel/releases/latest/download/corbel-installer.ps1 | iex"
 ```
 
 **Supported platforms** (per `dist-workspace.toml`, each built and tested in CI): `aarch64-apple-darwin`, `x86_64-apple-darwin`, `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`, `x86_64-pc-windows-msvc`.

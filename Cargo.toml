@@ -8,8 +8,8 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
-repository = "https://github.com/trybetaer/corbel"
-homepage = "https://github.com/trybetaer/corbel"
+repository = "https://github.com/BETAER-08/corbel"
+homepage = "https://github.com/BETAER-08/corbel"
 readme = "README.md"
 authors = ["BETAER"]
 
