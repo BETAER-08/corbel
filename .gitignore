@@ -8,6 +8,8 @@
 .fastembed_cache/
 benchmarks/repos/
 benchmarks/perf-repos/
-benchmarks/results/
+benchmarks/results/*
+!benchmarks/results/*.md
+benchmarks/results/latest.md
 __pycache__/
 .DS_Store

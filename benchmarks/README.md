@@ -108,6 +108,43 @@ Results are written as both
 `benchmarks/results/benchmark-<timestamp>.{md,json}` and
 `benchmarks/results/latest.{md,json}`.
 
+Only the `.md` report and its hand-written `-analysis.md` are committed —
+the raw `.json` (and `latest.{json,md}`) stay gitignored. The `.md` already
+carries the full per-entry breakdown; the `.json` is a regenerable
+intermediate (`python3 benchmarks/harness/run_benchmark.py` reproduces it),
+and tracking regenerable multi-megabyte blobs in git history has a
+permanent cost with no offsetting benefit.
+
+## Run provenance: the three-stage chain
+
+Three results in `benchmarks/results/` are kept as a deliberate provenance
+chain, not just the latest number:
+
+1. **[`benchmark-20260902T131822Z.md`](../results/benchmark-20260902T131822Z.md)** —
+   marked **INVALID** at the top of the file. The harness itself had no
+   TypeScript support yet (`tool_adapters.py` was a hardcoded rust/python
+   table), so grep and ripgrep scored a flat 0.000/0.000/0.000 on the
+   `chevrotain` (TypeScript) repo — not because they lost to corbel, but
+   because they couldn't search TypeScript at all. Kept rather than deleted
+   so the "before" state of the harness bug is checkable, not just
+   asserted.
+2. **[`benchmark-20260903T092406Z.md`](../results/benchmark-20260903T092406Z.md)** —
+   harness's TypeScript support fixed; corbel itself not yet touched.
+   corbel F1 0.395 here. This isolates the harness fix from any corbel
+   change: everything that moved between stage 1 and stage 2 is the
+   harness, not corbel.
+3. **[`benchmark-20260903T142000Z.md`](../results/benchmark-20260903T142000Z.md)** —
+   corbel's owner-qualification fix applied; harness untouched between
+   stage 2 and stage 3. corbel F1 0.707. grep, ripgrep, and ripgrep+ctags
+   score byte-identically to stage 2 here — direct evidence that this
+   stage's improvement came from corbel's own code, not from adjusting the
+   harness or golden set to move the number.
+
+Reading the three in order shows two separate fixes landing in two separate
+commits' worth of results, each isolable from the other — the point isn't
+"corbel got better," it's that *which* fix caused *which* change is
+checkable rather than asserted.
+
 ## What's actually being compared
 
 For every golden entry, all four tools are asked the same question — callers

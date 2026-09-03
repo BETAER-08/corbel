@@ -187,8 +187,8 @@ Full per-entry breakdown and adversarial-case detail: [benchmarks/results/](benc
 
 grep and ripgrep's numbers above are **byte-identical** to a run taken before the fix that moved corbel's own F1 from 0.395 to 0.707 — direct evidence the harness and golden set were not adjusted to move corbel's number:
 
-- [before](benchmarks/results/benchmark-20260903T092406Z.json) — corbel F1 0.395 ([analysis](benchmarks/results/benchmark-20260903T092406Z-analysis.md))
-- [after](benchmarks/results/benchmark-20260903T142000Z.json) — corbel F1 0.707 ([analysis](benchmarks/results/benchmark-20260903T142000Z-analysis.md))
+- [before](benchmarks/results/benchmark-20260903T092406Z.md) — corbel F1 0.395 ([analysis](benchmarks/results/benchmark-20260903T092406Z-analysis.md))
+- [after](benchmarks/results/benchmark-20260903T142000Z.md) — corbel F1 0.707 ([analysis](benchmarks/results/benchmark-20260903T142000Z-analysis.md))
 
 ```
 python3 benchmarks/harness/run_benchmark.py
