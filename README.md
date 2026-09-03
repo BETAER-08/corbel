@@ -8,32 +8,38 @@ corbel ships as a single static binary with no runtime dependencies, and your co
 
 ## The problem, in one real query
 
-"What calls `open_connection`?" — ripgrep and corbel, run against this repository:
+"What calls `format_duration_unit`?" — ripgrep and corbel, run against [sharkdp/hyperfine](https://github.com/sharkdp/hyperfine) at `f12f3d9f` (pinned so these numbers don't drift — clone it yourself to reproduce):
 
 ```
-$ rg -n '\bopen_connection\s*\(' --type rust -g '!target' .
-./crates/corbel/src/mcp/server.rs:162:        open_connection(":memory:").unwrap()
-./crates/corbel/src/mcp/server.rs:171:        let conn = open_connection(":memory:").unwrap();
-./crates/corbel/src/mcp/server.rs:187:        let conn = open_connection(":memory:").unwrap();
-./crates/corbel-core/tests/store_tests.rs:122:    let conn1 = open_connection(&db_path).unwrap();
-./crates/corbel-core/tests/store_tests.rs:125:    let conn2 = open_connection(&db_path).unwrap();
-...19 more lines, each a bare file:line with no indication of which function the call is inside
+$ rg -n 'format_duration_unit\(' src/
+src/output/format.rs:6:    let (duration_fmt, _) = format_duration_unit(duration, unit);
+src/output/format.rs:11:pub fn format_duration_unit(duration: Second, unit: Option<Unit>) -> (String, Unit) {
+src/output/format.rs:30:    let (out_str, out_unit) = format_duration_unit(1.3, None);
+src/output/format.rs:35:    let (out_str, out_unit) = format_duration_unit(1.0, None);
+...8 more lines, each a bare file:line with no indication of which function the call is inside
 ```
 
-ripgrep finds every text occurrence of `open_connection(` — 24 lines, unlabeled. Telling which caller is which means opening each file. corbel's `get_symbol`, called on the same function, resolves each hit to the function it's actually inside:
+ripgrep finds every text occurrence of `format_duration_unit(` — 12 lines (the declaration plus 11 real calls), unlabeled. Telling which caller is which, and which are duplicates from the same test, means opening the file and counting by hand. corbel's `get_symbol`, called on the same function, resolves each hit to the function it's actually inside:
 
 ```json
 {
   "callers": [
-    { "file": "crates/corbel-core/tests/store_tests.rs", "line": 118, "name": "reopening_migrated_db_does_not_duplicate_schema", "resolution": "scoped" },
-    { "file": "crates/corbel-core/tests/store_tests.rs", "line": 118, "name": "reopening_migrated_db_does_not_duplicate_schema", "resolution": "scoped" },
-    { "file": "crates/corbel/src/commands/index.rs", "line": 11, "name": "run", "resolution": "scoped" },
-    { "file": "crates/corbel/src/mcp/server.rs", "line": 165, "name": "indexed_conn", "resolution": "scoped" }
+    { "file": "src/benchmark/mod.rs", "line": 141, "name": "Benchmark::run", "resolution": "scoped" },
+    { "file": "src/output/format.rs", "line": 5, "name": "format_duration", "resolution": "same-file" },
+    { "file": "src/output/format.rs", "line": 29, "name": "test_format_duration_unit_basic", "resolution": "same-file" },
+    { "file": "src/output/format.rs", "line": 29, "name": "test_format_duration_unit_basic", "resolution": "same-file" },
+    { "file": "src/output/format.rs", "line": 29, "name": "test_format_duration_unit_basic", "resolution": "same-file" },
+    { "file": "src/output/format.rs", "line": 29, "name": "test_format_duration_unit_basic", "resolution": "same-file" },
+    { "file": "src/output/format.rs", "line": 29, "name": "test_format_duration_unit_basic", "resolution": "same-file" },
+    { "file": "src/output/format.rs", "line": 29, "name": "test_format_duration_unit_basic", "resolution": "same-file" },
+    { "file": "src/output/format.rs", "line": 62, "name": "test_format_duration_unit_with_unit", "resolution": "same-file" },
+    { "file": "src/output/format.rs", "line": 62, "name": "test_format_duration_unit_with_unit", "resolution": "same-file" },
+    { "file": "src/output/format.rs", "line": 62, "name": "test_format_duration_unit_with_unit", "resolution": "same-file" }
   ]
 }
 ```
 
-Two of those 24 `rg` lines are both inside `reopening_migrated_db_does_not_duplicate_schema` calling `open_connection` twice — `get_symbol` tells you that directly; grep leaves you to work it out by reading the file. That's the gap corbel closes: not finding text, but naming the caller.
+Six of those 11 calls are inside `test_format_duration_unit_basic` (one assertion per call), three inside `test_format_duration_unit_with_unit` — `get_symbol` tells you that directly; grep leaves you to work it out by reading the file. That's the gap corbel closes: not finding text, but naming the caller. This exact case (`hyperfine-10` in the golden set below) is hand-verified — corbel's answer here matches ground truth exactly, precision and recall both 1.0.
 
 ## Install
 
@@ -76,56 +82,59 @@ For other MCP clients, add corbel directly to the server config:
 
 ## The three tools
 
-**`get_symbol`** looks up a symbol by name and returns its definition (file, line, signature) plus everything that calls it and everything it calls. Every edge carries a `resolution` field explaining how corbel matched it to a specific definition. Real response, `get_symbol("read_schema_version")` against this repo:
+Examples below are all real responses against the same pinned repo as above ([sharkdp/hyperfine](https://github.com/sharkdp/hyperfine) at `f12f3d9f`) — clone it and run these yourself to check.
+
+**`get_symbol`** looks up a symbol by name and returns its definition (file, line, signature) plus everything that calls it and everything it calls. Every edge carries a `resolution` field explaining how corbel matched it to a specific definition. Real response, `get_symbol("format_duration_unit")`:
 
 ```json
 {
   "results": [{
-    "name": "read_schema_version",
-    "file": "crates/corbel-core/src/store/migrate.rs",
-    "line": 6,
-    "signature": "fn read_schema_version(conn: &Connection) -> Option<i32>",
+    "name": "format_duration_unit",
+    "file": "src/output/format.rs",
+    "line": 11,
+    "signature": "pub fn format_duration_unit(duration: Second, unit: Option<Unit>) -> (String, Unit)",
     "callers": [
-      { "file": "crates/corbel-core/src/store/migrate.rs", "line": 32, "name": "open_connection", "resolution": "same-file" },
-      { "file": "crates/corbel-core/src/store/migrate.rs", "line": 52, "name": "open_for_serve", "resolution": "same-file" }
+      { "file": "src/benchmark/mod.rs", "line": 141, "name": "Benchmark::run", "resolution": "scoped" }
+      /* ...10 more, see above */
     ],
     "callees": [
-      { "file": null, "name": "query_row", "resolution": "external" }
+      { "file": "src/output/format.rs", "name": "format_duration_value", "resolution": "same-file" }
     ],
     "truncated": false
   }]
 }
 ```
 
-**`impact`** is the flagship tool: it walks the reverse call graph from a symbol across multiple hops and returns every affected symbol tagged with `depth` and `resolution` — the multi-hop trace a single grep or a one-hop "find references" cannot do. Real response, `impact("resolve_all")` against this repo (86 affected symbols total, truncated here for length):
+**`impact`** is the flagship tool: it walks the reverse call graph from a symbol across multiple hops and returns every affected symbol tagged with `depth` and `resolution` — the multi-hop trace a single grep or a one-hop "find references" cannot do. Real response, `impact("compute_relative_speeds")` (6 affected symbols total):
 
 ```json
 {
   "results": [{
-    "target_name": "resolve_all",
+    "target_name": "compute_relative_speeds",
     "affected": [
-      { "depth": 1, "file": "crates/corbel-core/src/index.rs", "line": 29, "name": "index_repo", "resolution": "scoped" },
-      { "depth": 2, "file": "crates/corbel-core/tests/impact_tests.rs", "line": 29, "name": "direct_caller_is_captured_at_depth_one", "resolution": "scoped" },
-      { "depth": 3, "file": "crates/corbel/src/mcp/server.rs", "line": 255, "name": "get_symbol_call_returns_callers_and_callees", "resolution": "same-file" }
+      { "depth": 1, "file": "src/benchmark/relative_speed.rs", "line": 86, "name": "compute_with_check_from_reference", "resolution": "same-file" },
+      { "depth": 1, "file": "src/benchmark/relative_speed.rs", "line": 98, "name": "compute_with_check", "resolution": "same-file" },
+      { "depth": 2, "file": "src/benchmark/relative_speed.rs", "line": 143, "name": "test_compute_relative_speed", "resolution": "same-file" }
     ],
-    "affected_count": 86,
-    "max_depth_reached": 3,
+    "affected_count": 6,
+    "max_depth_reached": 2,
     "truncated": false
   }]
 }
 ```
 
-**`find`** is a name search over the index, for when the exact name to hand `get_symbol` isn't known yet. It does not resolve call relationships. Real response, `find("resolve", limit=5)` against this repo — 14 symbols match, 5 are returned:
+**`find`** is a name search over the index, for when the exact name to hand `get_symbol` isn't known yet. It does not resolve call relationships. Real response, `find("duration", limit=3)` — 5 symbols match, 3 are returned:
 
 ```json
 {
   "results": [
-    { "name": "resolve_all", "file": "crates/corbel-core/src/resolve.rs", "line": 27, "kind": "function" },
-    { "name": "resolve_repo_path", "file": "benchmarks/harness/run_benchmark.py", "line": 30, "kind": "function" }
+    { "name": "format_duration", "file": "src/output/format.rs", "line": 5, "kind": "function" },
+    { "name": "format_duration_unit", "file": "src/output/format.rs", "line": 11, "kind": "function" },
+    { "name": "format_duration_value", "file": "src/output/format.rs", "line": 18, "kind": "function" }
   ],
-  "total_matches": 14,
+  "total_matches": 5,
   "truncated": true,
-  "truncated_count": 9
+  "truncated_count": 2
 }
 ```
 
@@ -221,6 +230,15 @@ Cases that are structurally out of reach for static analysis, by design, in ever
 - **Standard library and external crate/package calls** are outside the index entirely and reported as `external` — corbel does not resolve into dependencies.
 
 **Measured breakdown of corbel's actual misses** (603 classified failures, callers + definition tasks): 13.4% name collision (a bare-name lookup limitation shared by every tool measured here, not corbel-specific), 6.8% dynamic dispatch, 2.3% a runtime prototype-assembly pattern (`chevrotain`'s `applyMixins`, which does `derivedCtor.prototype[key] = baseCtor.prototype[key]` at runtime — invisible to static analysis by construction), 0.8% duck typing. Full breakdown: [analysis](benchmarks/results/benchmark-20260903T142000Z-analysis.md).
+
+Name collision, concretely: [pallets/itsdangerous](https://github.com/pallets/itsdangerous) at `672971d6` defines `__init__` 13 times across its class hierarchy. `get_symbol("__init__")` with no `file`/`line` to disambiguate returns all 13 — corbel narrows by name, not by which class you meant, same as any bare-name index would:
+
+```
+$ corbel index . && echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_symbol","arguments":{"name":"__init__"}}}' | corbel serve .
+# 13 results across src/itsdangerous/exc.py, serializer.py, signer.py
+```
+
+Pass `file` (and `line`, if the file still has more than one match) — exactly what `find`'s results give you — to get exactly one.
 
 **A real, unfixed bug**: a Rust method defined as a trait's *default method body* (`trait Foo { fn bar(&self) { ... } }`, not inside an `impl` block) doesn't get an owner-qualified caller name — `owner_of_definition` walks up looking for `impl_item` and never checks for an enclosing `trait_item`. 3 occurrences in the benchmark (`MarkupExporter::table_results` in hyperfine). Narrow, but real, and listed here rather than folded into the percentages above.
 
