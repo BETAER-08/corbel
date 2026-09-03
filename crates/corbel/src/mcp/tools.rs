@@ -151,9 +151,17 @@ fn optional_limit(arguments: &Value) -> Result<usize, ToolCallError> {
     }
 }
 
+fn qualified_display_name(name: &str, owner: Option<&str>, lang: &str) -> String {
+    match owner {
+        None => name.to_string(),
+        Some(owner) if lang == "rs" => format!("{owner}::{name}"),
+        Some(owner) => format!("{owner}.{name}"),
+    }
+}
+
 fn caller_json(caller: &CallerInfo) -> Value {
     json!({
-        "name": caller.name,
+        "name": qualified_display_name(&caller.name, caller.owner.as_deref(), &caller.lang),
         "file": caller.file,
         "line": caller.line,
         "resolution": caller.resolution,
@@ -250,7 +258,7 @@ fn impact_payload(name: &str, results: &[ImpactResult]) -> Value {
                 "max_depth_reached": result.max_depth_reached,
                 "affected_count": result.affected.len(),
                 "affected": result.affected.iter().map(|node| json!({
-                    "name": node.name,
+                    "name": qualified_display_name(&node.name, node.owner.as_deref(), &node.lang),
                     "file": node.file,
                     "line": node.line,
                     "resolution": node.resolution,

@@ -290,3 +290,47 @@ fn import_entry_count_matches_fixture() {
 
     assert_eq!(entries.len(), 12);
 }
+
+fn nested_class_fixture_src() -> String {
+    fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/python_nested_class.py"
+    ))
+    .expect("fixture reads")
+}
+
+#[test]
+fn free_functions_have_no_owner() {
+    let support = PythonSupport;
+    let src = fixture_src();
+    let symbols = support.extract_symbols(&src);
+
+    let add = symbols.iter().find(|s| s.name == "add").unwrap();
+    assert_eq!(add.owner, None);
+
+    let caller = symbols.iter().find(|s| s.name == "caller").unwrap();
+    assert_eq!(caller.owner, None);
+}
+
+#[test]
+fn methods_inside_class_are_owner_qualified_by_the_class_name() {
+    let support = PythonSupport;
+    let src = fixture_src();
+    let symbols = support.extract_symbols(&src);
+
+    let init = symbols.iter().find(|s| s.name == "__init__").unwrap();
+    assert_eq!(init.owner.as_deref(), Some("Point"));
+
+    let private = symbols.iter().find(|s| s.name == "_private").unwrap();
+    assert_eq!(private.owner.as_deref(), Some("Point"));
+}
+
+#[test]
+fn nested_class_method_owner_is_the_full_dot_joined_qualname_chain() {
+    let support = PythonSupport;
+    let src = nested_class_fixture_src();
+    let symbols = support.extract_symbols(&src);
+
+    let method = symbols.iter().find(|s| s.name == "method").unwrap();
+    assert_eq!(method.owner.as_deref(), Some("Outer.Inner"));
+}

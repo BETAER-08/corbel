@@ -231,3 +231,31 @@ fn reference_query_still_compiles_and_captures_calls() {
 
     assert!(count >= 1);
 }
+
+fn class_owner_fixture_src() -> String {
+    fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/tsx_class_owner.tsx"
+    ))
+    .expect("fixture reads")
+}
+
+#[test]
+fn free_functions_have_no_owner() {
+    let support = TsxSupport;
+    let src = class_owner_fixture_src();
+    let symbols = support.extract_symbols(&src);
+
+    let free_fn = symbols.iter().find(|s| s.name == "freeFn").unwrap();
+    assert_eq!(free_fn.owner, None);
+}
+
+#[test]
+fn class_methods_are_owner_qualified_by_the_class_name() {
+    let support = TsxSupport;
+    let src = class_owner_fixture_src();
+    let symbols = support.extract_symbols(&src);
+
+    let render = symbols.iter().find(|s| s.name == "render").unwrap();
+    assert_eq!(render.owner.as_deref(), Some("Widget"));
+}

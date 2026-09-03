@@ -589,3 +589,30 @@ fn get_symbol_splits_budget_so_many_callers_do_not_starve_callees() {
     assert!(result.truncated);
     assert!(result.truncated_count > 0);
 }
+
+#[test]
+fn caller_info_carries_owner_for_a_method_caller_and_none_for_a_free_function_caller() {
+    let repo_dir = tempdir().unwrap();
+    fs::write(
+        repo_dir.path().join("lib.rs"),
+        b"pub fn helper() {}\n\nstruct Signer;\n\nimpl Signer {\n    pub fn unsign(&self) {\n        helper();\n    }\n}\n\npub fn free_caller() {\n    helper();\n}\n",
+    )
+    .unwrap();
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let (conn, _db_dir) = db();
+    let parser = registry();
+    index_repo(&root, &conn, &parser).unwrap();
+
+    let results = get_symbol(&conn, "helper", None, None, TokenBudget::new(AMPLE_BUDGET)).unwrap();
+    assert_eq!(results.len(), 1);
+    let callers = &results[0].callers;
+    assert_eq!(callers.len(), 2);
+
+    let method_caller = callers.iter().find(|c| c.name == "unsign").unwrap();
+    assert_eq!(method_caller.owner.as_deref(), Some("Signer"));
+    assert_eq!(method_caller.lang, "rs");
+
+    let free_caller = callers.iter().find(|c| c.name == "free_caller").unwrap();
+    assert_eq!(free_caller.owner, None);
+}

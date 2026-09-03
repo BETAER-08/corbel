@@ -23,6 +23,8 @@ pub struct CallerInfo {
     pub file: String,
     pub line: u32,
     pub resolution: String,
+    pub owner: Option<String>,
+    pub lang: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,7 +137,8 @@ fn find_caller_rows(
 ) -> Result<Vec<CallerRow>> {
     let mut stmt = conn.prepare(
         "SELECT caller_symbols.id, caller_symbols.file_id, caller_symbols.name,
-                caller_files.path, caller_symbols.line, relationships.resolution
+                caller_files.path, caller_symbols.line, relationships.resolution,
+                caller_symbols.owner, caller_files.lang
          FROM relationships
          JOIN symbols AS caller_symbols ON caller_symbols.id = relationships.caller_symbol_id
          JOIN files AS caller_files ON caller_files.id = caller_symbols.file_id
@@ -151,6 +154,8 @@ fn find_caller_rows(
                 file: row.get(3)?,
                 line: row.get(4)?,
                 resolution: row.get(5)?,
+                owner: row.get(6)?,
+                lang: row.get(7)?,
             },
         })
     })?;
@@ -251,6 +256,8 @@ pub struct ImpactNode {
     pub file: String,
     pub line: u32,
     pub resolution: String,
+    pub owner: Option<String>,
+    pub lang: String,
     pub depth: u32,
 }
 
@@ -315,6 +322,8 @@ fn impact_for_symbol(
                 file: caller_row.info.file.clone(),
                 line: caller_row.info.line,
                 resolution: caller_row.info.resolution.clone(),
+                owner: caller_row.info.owner.clone(),
+                lang: caller_row.info.lang.clone(),
                 depth: next_depth,
             });
 

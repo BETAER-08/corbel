@@ -89,6 +89,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             0 => migrate_v0_to_v1(conn)?,
             1 => migrate_v1_to_v2(conn)?,
             2 => migrate_v2_to_v3(conn)?,
+            3 => migrate_v3_to_v4(conn)?,
             v => {
                 return Err(Error::Migration {
                     expected: CURRENT_SCHEMA_VERSION as i64,
@@ -144,5 +145,17 @@ fn migrate_v2_to_v3(conn: &Connection) -> Result<()> {
         ",
     )?;
     conn.pragma_update(None, "user_version", 3)?;
+    Ok(())
+}
+
+fn migrate_v3_to_v4(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "
+        ALTER TABLE symbols ADD COLUMN owner TEXT;
+
+        UPDATE files SET hash = '';
+        ",
+    )?;
+    conn.pragma_update(None, "user_version", 4)?;
     Ok(())
 }

@@ -103,6 +103,7 @@ impl FileParser for LanguageRegistry {
                 line: raw.line,
                 signature: raw.signature,
                 is_public: raw.is_public,
+                owner: raw.owner,
             })
             .collect();
 

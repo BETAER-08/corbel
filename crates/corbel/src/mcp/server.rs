@@ -175,6 +175,22 @@ mod tests {
         conn
     }
 
+    fn indexed_conn_with_method_caller() -> Connection {
+        let repo_dir = tempdir().unwrap();
+        fs::write(
+            repo_dir.path().join("lib.rs"),
+            b"pub fn helper() {}\n\nstruct Signer;\n\nimpl Signer {\n    pub fn unsign(&self) {\n        helper();\n    }\n}\n",
+        )
+        .unwrap();
+
+        let root = RepoRoot::new(repo_dir.path()).unwrap();
+        let conn = open_connection(":memory:").unwrap();
+        let mut registry = LanguageRegistry::new();
+        registry.register(Box::new(RustSupport)).unwrap();
+        index_repo(&root, &conn, &registry).unwrap();
+        conn
+    }
+
     fn indexed_conn_with_duplicate_name_in_same_file() -> Connection {
         let repo_dir = tempdir().unwrap();
         fs::write(
@@ -249,6 +265,20 @@ mod tests {
         .unwrap();
         let parsed: Value = serde_json::from_str(&response).unwrap();
         assert_eq!(parsed["error"]["code"], -32602);
+    }
+
+    #[test]
+    fn get_symbol_call_reports_owner_qualified_name_for_a_method_caller() {
+        let conn = indexed_conn_with_method_caller();
+        let response = handle_line(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_symbol","arguments":{"name":"helper"}}}"#,
+            &conn,
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&response).unwrap();
+        let text = parsed["result"]["content"][0]["text"].as_str().unwrap();
+        let payload: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(payload["results"][0]["callers"][0]["name"], "Signer::unsign");
     }
 
     #[test]

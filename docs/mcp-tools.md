@@ -35,9 +35,9 @@ Each entry in `results` is:
 
 | Field             | Description                                                  |
 | ----------------- | -------------------------------------------------------------- |
-| `name`, `file`, `line`, `kind`, `signature`, `is_public` | The symbol's own definition metadata. |
-| `callers`         | Symbols that call this one. Each entry has `name`, `file`, `line` (the caller's own definition line, not the call site), and `resolution` (how corbel resolved that reference, e.g. same-file, scoped, global-unique). |
-| `callees`         | Symbols this one calls. Each entry has `name`, `file` (`null` if unresolved or external), and `resolution`. |
+| `name`, `file`, `line`, `kind`, `signature`, `is_public` | The symbol's own definition metadata. `name` here is always bare (e.g. `unsign`), never owner-qualified, even when the matched symbol is itself a method. |
+| `callers`         | Symbols that call this one. Each entry has `name`, `file`, `line` (the caller's own definition line, not the call site), and `resolution` (how corbel resolved that reference, e.g. same-file, scoped, global-unique). If the caller is a method or a class/impl-scoped function, `name` is owner-qualified: `Owner::name` for Rust (e.g. `Signer::unsign`), `Owner.name` for Python/TypeScript/JavaScript (e.g. `Signer.unsign`). If the caller is a free function (no enclosing `impl`/`class`), `name` is bare, exactly as in the top-level entry above — **this asymmetry is intentional and will not change**: only `callers`/`impact.affected` entries are ever qualified, the entry's own top-level `name` never is. Parse accordingly: don't assume every `name` in a `get_symbol` response follows the same format. |
+| `callees`         | Symbols this one calls. Each entry has `name`, `file` (`null` if unresolved or external), and `resolution`. `name` here is always the bare text of the call expression as written in source (e.g. `unsign` from `self.unsign()`), never owner-qualified — a callee's owner is not tracked. |
 | `truncated`       | Whether `callers` and/or `callees` were cut to fit the token budget for this result. |
 | `truncated_count` | How many caller and callee entries together were left out.   |
 
@@ -64,8 +64,8 @@ Each entry in `results` is:
 
 | Field               | Description                                                  |
 | ------------------- | -------------------------------------------------------------- |
-| `target_name`, `target_file`, `target_line` | The symbol the analysis started from.       |
-| `affected`           | Every symbol reachable by walking callers outward from the target. Each entry has `name`, `file`, `line`, `resolution`, and `depth` (how many hops away it is). |
+| `target_name`, `target_file`, `target_line` | The symbol the analysis started from. `target_name` is always bare, same as `get_symbol`'s top-level `name`. |
+| `affected`           | Every symbol reachable by walking callers outward from the target. Each entry has `name`, `file`, `line`, `resolution`, and `depth` (how many hops away it is). `name` follows the same owner-qualification rule as `get_symbol`'s `callers[].name` above: `Owner::name`/`Owner.name` for a method, bare for a free function. |
 | `affected_count`     | Number of entries in `affected`.                              |
 | `max_depth_reached`  | The largest `depth` value present in `affected`.               |
 | `truncated`          | Whether `affected` was cut to fit the token budget.            |

@@ -47,6 +47,16 @@ fn last_segment(path: &str) -> String {
     path.rsplit("::").next().unwrap_or(path).to_string()
 }
 
+fn rust_type_name(node: Node, src: &str) -> Option<String> {
+    match node.kind() {
+        "type_identifier" => node.utf8_text(src.as_bytes()).ok().map(str::to_string),
+        "generic_type" => rust_type_name(node.child_by_field_name("type")?, src),
+        "reference_type" => rust_type_name(node.child_by_field_name("type")?, src),
+        "scoped_type_identifier" => rust_type_name(node.child_by_field_name("name")?, src),
+        _ => None,
+    }
+}
+
 fn join_path(prefix: Option<&str>, rel: &str) -> String {
     match prefix {
         Some(p) if !rel.is_empty() => format!("{p}::{rel}"),
@@ -225,6 +235,18 @@ impl LanguageSupport for RustSupport {
             if ancestor.kind() == "function_item" {
                 let name_node = ancestor.child_by_field_name("name")?;
                 return name_node.utf8_text(src.as_bytes()).ok().map(str::to_string);
+            }
+            current = ancestor.parent();
+        }
+        None
+    }
+
+    fn owner_of_definition(&self, node: tree_sitter::Node, src: &str) -> Option<String> {
+        let mut current = node.parent();
+        while let Some(ancestor) = current {
+            if ancestor.kind() == "impl_item" {
+                let type_field = ancestor.child_by_field_name("type")?;
+                return rust_type_name(type_field, src);
             }
             current = ancestor.parent();
         }

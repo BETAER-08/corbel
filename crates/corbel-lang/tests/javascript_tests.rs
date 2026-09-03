@@ -278,3 +278,23 @@ fn reference_query_still_compiles_and_captures_calls() {
 
     assert!(count >= 1);
 }
+
+#[test]
+fn free_functions_have_no_owner() {
+    let support = JavaScriptSupport;
+    let src = fixture_src();
+    let symbols = support.extract_symbols(&src);
+
+    let pub_fn = symbols.iter().find(|s| s.name == "pub").unwrap();
+    assert_eq!(pub_fn.owner, None);
+}
+
+#[test]
+fn class_methods_are_owner_qualified_by_the_class_name() {
+    let support = JavaScriptSupport;
+    let src = fixture_src();
+    let symbols = support.extract_symbols(&src);
+
+    let pub_method = symbols.iter().find(|s| s.name == "pubMethod").unwrap();
+    assert_eq!(pub_method.owner.as_deref(), Some("Foo"));
+}

@@ -1,7 +1,7 @@
 use crate::error::Result;
 use rusqlite::Connection;
 
-pub const CURRENT_SCHEMA_VERSION: i32 = 3;
+pub const CURRENT_SCHEMA_VERSION: i32 = 4;
 
 const SCHEMA_DDL: &str = "
 CREATE TABLE files (
@@ -19,7 +19,8 @@ CREATE TABLE symbols (
     kind TEXT NOT NULL,
     line INTEGER NOT NULL,
     signature TEXT,
-    is_public INTEGER NOT NULL
+    is_public INTEGER NOT NULL,
+    owner TEXT
 );
 
 CREATE TABLE relationships (

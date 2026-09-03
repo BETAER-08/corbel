@@ -270,6 +270,73 @@ pub(crate) fn enclosing_definition_name(node: tree_sitter::Node, src: &str) -> O
     None
 }
 
+fn class_chain_name(mut class_node: tree_sitter::Node, src: &str) -> Option<String> {
+    let mut names = Vec::new();
+    loop {
+        if let Some(name_node) = class_node.child_by_field_name("name") {
+            if let Ok(name) = name_node.utf8_text(src.as_bytes()) {
+                names.push(name.to_string());
+            }
+        }
+        let mut current = class_node.parent();
+        let mut found_outer = None;
+        while let Some(ancestor) = current {
+            if matches!(ancestor.kind(), "class_declaration" | "class") {
+                found_outer = Some(ancestor);
+                break;
+            }
+            current = ancestor.parent();
+        }
+        match found_outer {
+            Some(outer) => class_node = outer,
+            None => break,
+        }
+    }
+    if names.is_empty() {
+        None
+    } else {
+        names.reverse();
+        Some(names.join("."))
+    }
+}
+
+fn object_owner_name(object_node: tree_sitter::Node, src: &str) -> Option<String> {
+    let parent = object_node.parent()?;
+    match parent.kind() {
+        "variable_declarator" => {
+            let value = parent.child_by_field_name("value")?;
+            if value.id() != object_node.id() {
+                return None;
+            }
+            let name_node = parent.child_by_field_name("name")?;
+            name_node.utf8_text(src.as_bytes()).ok().map(str::to_string)
+        }
+        "pair" => {
+            let value = parent.child_by_field_name("value")?;
+            if value.id() != object_node.id() {
+                return None;
+            }
+            let key_node = parent.child_by_field_name("key")?;
+            let key_text = key_node.utf8_text(src.as_bytes()).ok()?;
+            Some(key_text.trim_matches(|c| c == '"' || c == '\'').to_string())
+        }
+        _ => None,
+    }
+}
+
+pub(crate) fn owner_of_definition(node: tree_sitter::Node, src: &str) -> Option<String> {
+    let mut current = node.parent();
+    while let Some(ancestor) = current {
+        match ancestor.kind() {
+            "class_declaration" | "class" => return class_chain_name(ancestor, src),
+            "object" => return object_owner_name(ancestor, src),
+            _ => {}
+        }
+        current = ancestor.parent();
+    }
+    None
+}
+
 pub(crate) fn build_scope(tree: &tree_sitter::Tree, src: &str) -> ScopeTable {
     let mut entries = Vec::new();
     walk_imports(tree.root_node(), src, &mut entries);
@@ -309,6 +376,10 @@ impl LanguageSupport for TypeScriptSupport {
 
     fn enclosing_definition_name(&self, node: tree_sitter::Node, src: &str) -> Option<String> {
         enclosing_definition_name(node, src)
+    }
+
+    fn owner_of_definition(&self, node: tree_sitter::Node, src: &str) -> Option<String> {
+        owner_of_definition(node, src)
     }
 
     fn build_scope(&self, tree: &tree_sitter::Tree, src: &str) -> ScopeTable {

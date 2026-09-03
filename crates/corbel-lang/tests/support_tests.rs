@@ -8,6 +8,7 @@ fn raw_symbol_is_debug_clone_partial_eq() {
         line: 1,
         signature: Some("fn foo()".to_string()),
         is_public: true,
+        owner: None,
     };
     let b = a.clone();
     assert_eq!(a, b);

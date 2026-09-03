@@ -104,6 +104,10 @@ impl LanguageSupport for JavaScriptSupport {
         typescript::enclosing_definition_name(node, src)
     }
 
+    fn owner_of_definition(&self, node: tree_sitter::Node, src: &str) -> Option<String> {
+        typescript::owner_of_definition(node, src)
+    }
+
     fn build_scope(&self, tree: &tree_sitter::Tree, src: &str) -> ScopeTable {
         typescript::build_scope(tree, src)
     }

@@ -126,8 +126,8 @@ pub fn index_repo(
 
         for symbol in &parsed.symbols {
             tx.execute(
-                "INSERT INTO symbols (file_id, name, kind, line, signature, is_public)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                "INSERT INTO symbols (file_id, name, kind, line, signature, is_public, owner)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![
                     file_id,
                     symbol.name,
@@ -135,6 +135,7 @@ pub fn index_repo(
                     symbol.line,
                     symbol.signature,
                     symbol.is_public,
+                    symbol.owner,
                 ],
             )?;
             let symbol_id = tx.last_insert_rowid();

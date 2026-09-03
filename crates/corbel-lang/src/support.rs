@@ -5,6 +5,7 @@ pub struct RawSymbol {
     pub line: u32,
     pub signature: Option<String>,
     pub is_public: bool,
+    pub owner: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,6 +47,8 @@ pub trait LanguageSupport {
     fn build_scope(&self, tree: &tree_sitter::Tree, src: &str) -> ScopeTable;
 
     fn enclosing_definition_name(&self, node: tree_sitter::Node, src: &str) -> Option<String>;
+
+    fn owner_of_definition(&self, node: tree_sitter::Node, src: &str) -> Option<String>;
 
     fn extract_symbols(&self, src: &str) -> Vec<RawSymbol> {
         use tree_sitter::StreamingIterator;
@@ -92,6 +95,7 @@ pub trait LanguageSupport {
                 line: definition.start_position().row as u32 + 1,
                 signature: self.extract_signature(definition, src),
                 is_public: self.is_public(definition, src),
+                owner: self.owner_of_definition(definition, src),
             });
         }
 

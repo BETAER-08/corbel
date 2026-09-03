@@ -254,3 +254,70 @@ fn build_scope_entry_count_matches_fixture() {
 
     assert_eq!(entries.len(), 16);
 }
+
+fn impl_owner_variants_fixture_src() -> String {
+    fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/rust_impl_owner_variants.rs"
+    ))
+    .expect("fixture reads")
+}
+
+#[test]
+fn free_functions_have_no_owner() {
+    let support = RustSupport;
+    let src = fixture_src();
+    let symbols = support.extract_symbols(&src);
+
+    let add = symbols.iter().find(|s| s.name == "add").unwrap();
+    assert_eq!(add.owner, None);
+
+    let helper = symbols.iter().find(|s| s.name == "helper").unwrap();
+    assert_eq!(helper.owner, None);
+}
+
+#[test]
+fn methods_inside_impl_block_are_owner_qualified_by_the_impl_type() {
+    let support = RustSupport;
+    let src = fixture_src();
+    let symbols = support.extract_symbols(&src);
+
+    let new_fn = symbols.iter().find(|s| s.name == "new").unwrap();
+    assert_eq!(new_fn.owner.as_deref(), Some("Point"));
+
+    let distance = symbols
+        .iter()
+        .find(|s| s.name == "distance_from_origin")
+        .unwrap();
+    assert_eq!(distance.owner.as_deref(), Some("Point"));
+}
+
+#[test]
+fn generic_impl_type_owner_strips_type_parameters() {
+    let support = RustSupport;
+    let src = impl_owner_variants_fixture_src();
+    let symbols = support.extract_symbols(&src);
+
+    let get = symbols.iter().find(|s| s.name == "get").unwrap();
+    assert_eq!(get.owner.as_deref(), Some("Container"));
+}
+
+#[test]
+fn trait_impl_owner_uses_the_concrete_type_not_the_trait() {
+    let support = RustSupport;
+    let src = impl_owner_variants_fixture_src();
+    let symbols = support.extract_symbols(&src);
+
+    let foo_method = symbols.iter().find(|s| s.name == "foo_method").unwrap();
+    assert_eq!(foo_method.owner.as_deref(), Some("Bar"));
+}
+
+#[test]
+fn scoped_type_identifier_impl_owner_uses_the_short_type_name() {
+    let support = RustSupport;
+    let src = impl_owner_variants_fixture_src();
+    let symbols = support.extract_symbols(&src);
+
+    let baz_method = symbols.iter().find(|s| s.name == "baz_method").unwrap();
+    assert_eq!(baz_method.owner.as_deref(), Some("Baz"));
+}

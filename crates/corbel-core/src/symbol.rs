@@ -7,6 +7,7 @@ pub struct Symbol {
     pub line: u32,
     pub signature: Option<String>,
     pub is_public: bool,
+    pub owner: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

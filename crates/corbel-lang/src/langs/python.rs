@@ -204,6 +204,27 @@ impl LanguageSupport for PythonSupport {
         None
     }
 
+    fn owner_of_definition(&self, node: tree_sitter::Node, src: &str) -> Option<String> {
+        let mut names = Vec::new();
+        let mut current = node.parent();
+        while let Some(ancestor) = current {
+            if ancestor.kind() == "class_definition" {
+                if let Some(name_node) = ancestor.child_by_field_name("name") {
+                    if let Ok(name) = name_node.utf8_text(src.as_bytes()) {
+                        names.push(name.to_string());
+                    }
+                }
+            }
+            current = ancestor.parent();
+        }
+        if names.is_empty() {
+            None
+        } else {
+            names.reverse();
+            Some(names.join("."))
+        }
+    }
+
     fn build_scope(&self, tree: &tree_sitter::Tree, src: &str) -> ScopeTable {
         let mut entries = Vec::new();
         walk_imports(tree.root_node(), src, &mut entries);

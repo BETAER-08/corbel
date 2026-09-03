@@ -295,7 +295,7 @@ fn migrate_v2_to_v3_empties_imports_and_invalidates_hashes() {
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
     assert_eq!(user_version, CURRENT_SCHEMA_VERSION);
-    assert_eq!(user_version, 3);
+    assert_eq!(user_version, 4);
 
     let import_count: i64 = conn
         .query_row("SELECT COUNT(*) FROM imports", [], |row| row.get(0))
@@ -488,4 +488,100 @@ fn open_connection_rebuild_removes_stale_wal_and_shm_siblings() {
 
     let wal_contents = std::fs::read(dir.path().join("index.sqlite-wal"));
     assert_ne!(wal_contents.unwrap_or_default(), b"stale wal");
+}
+
+fn create_v3_schema_db(db_path: &std::path::Path) {
+    let conn = rusqlite::Connection::open(db_path).unwrap();
+    conn.execute_batch(
+        "
+        CREATE TABLE files (
+            id INTEGER PRIMARY KEY,
+            path TEXT NOT NULL UNIQUE,
+            lang TEXT NOT NULL,
+            hash TEXT NOT NULL,
+            indexed_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE symbols (
+            id INTEGER PRIMARY KEY,
+            file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            line INTEGER NOT NULL,
+            signature TEXT,
+            is_public INTEGER NOT NULL
+        );
+
+        CREATE TABLE relationships (
+            id INTEGER PRIMARY KEY,
+            caller_symbol_id INTEGER NOT NULL REFERENCES symbols(id) ON DELETE CASCADE,
+            callee_name TEXT NOT NULL,
+            callee_file_id INTEGER REFERENCES files(id) ON DELETE SET NULL,
+            resolution TEXT NOT NULL CHECK (resolution IN ('same-file', 'scoped', 'global-unique', 'external', 'unresolved'))
+        );
+
+        CREATE TABLE imports (
+            id INTEGER PRIMARY KEY,
+            file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+            local_name TEXT,
+            source_path TEXT NOT NULL,
+            kind TEXT NOT NULL
+        );
+
+        CREATE TABLE embeddings (
+            symbol_id INTEGER PRIMARY KEY REFERENCES symbols(id) ON DELETE CASCADE,
+            vector BLOB NOT NULL
+        );
+
+        CREATE INDEX idx_symbols_name ON symbols(name);
+        CREATE INDEX idx_relationships_callee_file ON relationships(callee_file_id);
+        CREATE INDEX idx_symbols_file ON symbols(file_id);
+        CREATE INDEX idx_imports_file ON imports(file_id);
+
+        INSERT INTO files (id, path, lang, hash, indexed_at) VALUES (1, 'a.rs', 'rust', 'deadbeefcafebabe', 0);
+        INSERT INTO symbols (id, file_id, name, kind, line, signature, is_public) VALUES (1, 1, 'a', 'function', 1, NULL, 0);
+        ",
+    )
+    .unwrap();
+    conn.pragma_update(None, "user_version", 3).unwrap();
+}
+
+#[test]
+fn open_for_serve_rejects_pre_owner_column_v3_index_and_advises_reindex() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join("index.sqlite");
+    create_v3_schema_db(&db_path);
+
+    let bytes_before = std::fs::read(&db_path).unwrap();
+
+    let result = corbel_core::store::migrate::open_for_serve(&db_path);
+
+    let bytes_after = std::fs::read(&db_path).unwrap();
+    assert_eq!(bytes_before, bytes_after);
+    assert!(!dir.path().join("index.sqlite-wal").exists());
+    assert!(!dir.path().join("index.sqlite-shm").exists());
+
+    match result {
+        Err(Error::IncompatibleSchema {
+            expected,
+            condition: corbel_core::error::SchemaCondition::VersionMismatch(found),
+        }) => {
+            assert_eq!(expected, CURRENT_SCHEMA_VERSION as i64);
+            assert_eq!(found, 3);
+        }
+        other => panic!("expected IncompatibleSchema/VersionMismatch, got {other:?}"),
+    }
+
+    let reopened = open_connection(&db_path).unwrap();
+    let user_version: i32 = reopened
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(user_version, CURRENT_SCHEMA_VERSION);
+
+    let owner: Option<String> = reopened
+        .query_row("SELECT owner FROM symbols WHERE id = 1", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(owner, None);
 }

@@ -326,3 +326,64 @@ fn import_entry_count_matches_fixture() {
 
     assert_eq!(entries.len(), 10);
 }
+
+fn object_literal_owner_fixture_src() -> String {
+    fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/typescript_object_literal_owner.ts"
+    ))
+    .expect("fixture reads")
+}
+
+#[test]
+fn free_functions_have_no_owner() {
+    let support = TypeScriptSupport;
+    let src = fixture_src();
+    let symbols = support.extract_symbols(&src);
+
+    let pub_fn = symbols.iter().find(|s| s.name == "pub").unwrap();
+    assert_eq!(pub_fn.owner, None);
+
+    let caller = symbols.iter().find(|s| s.name == "caller").unwrap();
+    assert_eq!(caller.owner, None);
+}
+
+#[test]
+fn class_methods_are_owner_qualified_by_the_class_name() {
+    let support = TypeScriptSupport;
+    let src = fixture_src();
+    let symbols = support.extract_symbols(&src);
+
+    let pub_method = symbols.iter().find(|s| s.name == "pubMethod").unwrap();
+    assert_eq!(pub_method.owner.as_deref(), Some("Foo"));
+}
+
+#[test]
+fn object_literal_method_owner_is_the_variable_it_is_assigned_to() {
+    let support = TypeScriptSupport;
+    let src = object_literal_owner_fixture_src();
+    let symbols = support.extract_symbols(&src);
+
+    let build_message = symbols.iter().find(|s| s.name == "buildMessage").unwrap();
+    assert_eq!(build_message.owner.as_deref(), Some("defaultProvider"));
+}
+
+#[test]
+fn object_literal_method_owner_is_the_nearest_property_key_not_a_chain() {
+    let support = TypeScriptSupport;
+    let src = object_literal_owner_fixture_src();
+    let symbols = support.extract_symbols(&src);
+
+    let on_event = symbols.iter().find(|s| s.name == "onEvent").unwrap();
+    assert_eq!(on_event.owner.as_deref(), Some("handlers"));
+}
+
+#[test]
+fn inline_anonymous_object_literal_method_has_no_owner() {
+    let support = TypeScriptSupport;
+    let src = object_literal_owner_fixture_src();
+    let symbols = support.extract_symbols(&src);
+
+    let run = symbols.iter().find(|s| s.name == "run").unwrap();
+    assert_eq!(run.owner, None);
+}

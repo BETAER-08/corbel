@@ -42,6 +42,10 @@ impl LanguageSupport for StubLanguage {
     fn enclosing_definition_name(&self, _node: tree_sitter::Node, _src: &str) -> Option<String> {
         None
     }
+
+    fn owner_of_definition(&self, _node: tree_sitter::Node, _src: &str) -> Option<String> {
+        None
+    }
 }
 
 #[test]
