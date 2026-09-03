@@ -2,7 +2,7 @@ import json
 
 import metrics
 
-TOOLS = ["corbel", "grep", "ripgrep", "ctags"]
+TOOLS = ["corbel", "grep", "ripgrep", "ripgrep+ctags"]
 
 
 def render_json(run_report):
@@ -60,8 +60,27 @@ def _failure_causes(task_results):
 
 def render_markdown(run_report):
     lines = []
-    lines.append("# corbel vs grep / ripgrep / ctags benchmark")
+    lines.append("# corbel vs grep / ripgrep / ripgrep+ctags benchmark")
     lines.append("")
+    lines.append(
+        "`ripgrep+ctags` is a hybrid, not plain ctags: call-site discovery comes "
+        "from ripgrep (or grep if ripgrep is unavailable), and ctags supplies only "
+        "the enclosing-scope/end-line lookup for those hits (definition lookup is "
+        "the one task answered by ctags alone). Plain ctags has no call-site index "
+        "and could not attempt the callers task at all, which is why this harness "
+        "measures the hybrid a real user would reach for instead of a strawman "
+        "zero score."
+    )
+    lines.append("")
+
+    if not run_report.get("callees_task_included", True):
+        lines.append(
+            "**The callees (T2) task was skipped in this run "
+            f"({run_report.get('callees_task_exclusion_reason', '')}). "
+            "No callees rows appear in the tables below. Pass `--include-callees` "
+            "to include it.**"
+        )
+        lines.append("")
 
     all_truncated_cases = run_report.get("truncated_cases", [])
     if all_truncated_cases:
@@ -100,7 +119,18 @@ def render_markdown(run_report):
         lines.append("")
         lines.append(f"- Expected commit: `{repo['expected_commit']}`")
         lines.append(f"- Actual commit at run time: `{repo['actual_commit']}`")
-        lines.append(f"- Commit match: {'yes' if repo['commit_matches'] else '**NO - results not reproducible against pinned commit**'}")
+        if repo["commit_matches"]:
+            lines.append("- Commit match: yes")
+        else:
+            mismatch = repo.get("commit_mismatch_detail") or {}
+            lines.append("- Commit match: **NO - results not reproducible against pinned commit**")
+            source_changed = mismatch.get("source_changed")
+            if source_changed is True:
+                lines.append(f"  - **Source files changed since pin.** {mismatch.get('detail')}")
+            elif source_changed is False:
+                lines.append(f"  - No source changes detected. {mismatch.get('detail')}")
+            elif mismatch:
+                lines.append(f"  - **Could not determine drift type.** {mismatch.get('detail')}")
         lines.append(f"- Search scope: `{repo['search_root']}` (all four tools, including corbel's repo-wide index results, are restricted to this path before scoring)")
         if repo.get("search_root_note"):
             lines.append(f"- Search scope rationale: {repo['search_root_note']}")

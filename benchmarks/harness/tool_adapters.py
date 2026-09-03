@@ -31,22 +31,132 @@ PY_KEYWORDS = {
     "except", "assert", "yield", "lambda", "and", "or", "not", "in", "print",
     "raise", "await", "async",
 }
+TS_JS_KEYWORDS = {
+    "if", "for", "while", "return", "function", "class", "const", "let",
+    "var", "new", "typeof", "instanceof", "await", "async", "import",
+    "export", "else", "do", "switch", "case", "break", "continue", "try",
+    "catch", "finally", "throw", "delete", "in", "of", "void", "yield",
+    "extends", "implements", "interface", "type", "enum", "namespace",
+    "public", "private", "protected", "static", "readonly", "super",
+    "this", "get", "set", "default",
+}
 
 CALL_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 
 
+def _rust_def_pattern(name):
+    n = re.escape(name)
+    return rf"^\s*(pub(\([^)]*\))?\s+)?(async\s+)?fn\s+{n}\b"
+
+
+def _python_def_pattern(name):
+    n = re.escape(name)
+    return rf"^\s*def\s+{n}\b"
+
+
+def _ts_def_pattern(name):
+    # Best-effort coverage of the four most common TS/JS definition shapes:
+    # function declarations, class-method/object-literal-method shorthand,
+    # and arrow-function/function-expression assignment. Not exhaustive —
+    # see TS_JS_LIMITATIONS.md for what this intentionally does not catch.
+    n = re.escape(name)
+    func_decl = rf"^\s*(export\s+)?(default\s+)?(async\s+)?function\s*\*?\s+{n}\s*\("
+    # Requires a trailing `{` on the same line, unlike func_decl/assigned_fn,
+    # because this branch has no keyword anchor (`function`/`const`) and
+    # would otherwise match plain call statements like `name(args);` as if
+    # they were definitions. Costs Allman-brace-style methods; see
+    # TS_JS_LIMITATIONS.md.
+    method_shorthand = (
+        r"^\s*(public\s+|private\s+|protected\s+|static\s+|readonly\s+|"
+        r"abstract\s+|async\s+|\*\s*)*" + n + r"\s*\(.*\)\s*(:[^{]+)?\{\s*$"
+    )
+    assigned_fn = (
+        rf"^\s*(export\s+)?(default\s+)?(const|let|var)\s+{n}\s*(:[^=]+)?=\s*"
+        rf"(async\s+)?(\(|function)"
+    )
+    return f"({func_decl})|({method_shorthand})|({assigned_fn})"
+
+
+# Single source of truth for every language-specific behavior in this file:
+# keyword filtering for callee scanning, directory exclusions, file
+# extensions (grep --include), ripgrep's builtin -t type name, universal
+# ctags' --languages name, the qualified-name separator CtagsIndex uses, and
+# the definition-search regex. Add a language by adding one entry here.
+LANGUAGES = {
+    "rust": {
+        "keywords": RUST_KEYWORDS,
+        "exclude_dirs": [".git", "target"],
+        "extensions": ["rs"],
+        "rg_type": "rust",
+        "ctags_language": "Rust",
+        "qualified_sep": "::",
+        "def_pattern": _rust_def_pattern,
+    },
+    "python": {
+        "keywords": PY_KEYWORDS,
+        "exclude_dirs": [
+            ".git", "__pycache__", "build", "dist", ".venv", "venv",
+            "*.egg-info", ".mypy_cache", ".pytest_cache",
+        ],
+        "extensions": ["py"],
+        "rg_type": "py",
+        "ctags_language": "Python",
+        "qualified_sep": ".",
+        "def_pattern": _python_def_pattern,
+    },
+    "typescript": {
+        "keywords": TS_JS_KEYWORDS,
+        "exclude_dirs": [".git", "node_modules", "dist", "build"],
+        "extensions": ["ts", "tsx"],
+        "rg_type": "ts",
+        "ctags_language": "TypeScript",
+        "qualified_sep": ".",
+        "def_pattern": _ts_def_pattern,
+    },
+    "tsx": {
+        "keywords": TS_JS_KEYWORDS,
+        "exclude_dirs": [".git", "node_modules", "dist", "build"],
+        "extensions": ["tsx"],
+        "rg_type": "ts",
+        "ctags_language": "TSX",
+        "qualified_sep": ".",
+        "def_pattern": _ts_def_pattern,
+    },
+    "javascript": {
+        "keywords": TS_JS_KEYWORDS,
+        "exclude_dirs": [".git", "node_modules", "dist", "build"],
+        "extensions": ["js", "jsx"],
+        "rg_type": "js",
+        "ctags_language": "JavaScript",
+        "qualified_sep": ".",
+        "def_pattern": _ts_def_pattern,
+    },
+}
+
+
+def _lang_config(language):
+    try:
+        return LANGUAGES[language]
+    except KeyError:
+        raise ValueError(
+            f"unsupported language {language!r}; add it to LANGUAGES in tool_adapters.py"
+        ) from None
+
+
 def _keywords_for(language):
-    return RUST_KEYWORDS if language == "rust" else PY_KEYWORDS
+    return _lang_config(language)["keywords"]
 
 
 def _exclude_dirs(language):
-    if language == "rust":
-        return [".git", "target"]
-    return [".git", "__pycache__", "build", "dist", ".venv", "venv", "*.egg-info", ".mypy_cache", ".pytest_cache"]
+    return _lang_config(language)["exclude_dirs"]
 
 
-def _extension_for(language):
-    return "rs" if language == "rust" else "py"
+def _extensions_for(language):
+    return _lang_config(language)["extensions"]
+
+
+def _def_pattern_for(language, name):
+    return _lang_config(language)["def_pattern"](name)
 
 
 class ToolUnavailable(RuntimeError):
@@ -83,10 +193,21 @@ def _run(cmd, cwd=None, timeout=120):
     return proc, elapsed
 
 
+def _ripgrep_exclude_args(language):
+    args = []
+    for d in _exclude_dirs(language):
+        args += ["-g", f"!{d}"]
+    return args
+
+
 def _ripgrep_call_sites(repo_root, name, language, search_dir=None):
     rg = _require("rg")
     pattern = rf"\b{re.escape(name)}\s*\("
-    cmd = [rg, "-n", "--no-heading", "-t", "rust" if language == "rust" else "py", pattern, str(search_dir or repo_root)]
+    cmd = (
+        [rg, "-n", "--no-heading", "-t", _lang_config(language)["rg_type"]]
+        + _ripgrep_exclude_args(language)
+        + [pattern, str(search_dir or repo_root)]
+    )
     proc, elapsed = _run(cmd)
     hits = []
     for line in proc.stdout.splitlines():
@@ -105,11 +226,11 @@ def _ripgrep_call_sites(repo_root, name, language, search_dir=None):
 def _system_grep_call_sites(repo_root, name, language, search_dir=None):
     grep = _require("grep")
     pattern = rf"\b{re.escape(name)}\s*\("
-    ext = _extension_for(language)
     args = ["-rnE"]
     for d in _exclude_dirs(language):
         args += [f"--exclude-dir={d}"]
-    args += [f"--include=*.{ext}"]
+    for ext in _extensions_for(language):
+        args += [f"--include=*.{ext}"]
     cmd = [grep] + args + [pattern, str(search_dir or repo_root)]
     proc, elapsed = _run(cmd)
     hits = []
@@ -204,13 +325,13 @@ def grep_find_callees(repo_root, name, def_file, def_line, language):
 
 
 def ripgrep_find_definition(repo_root, name, language, search_dir=None):
-    def_pattern = (
-        rf"^\s*(pub(\([^)]*\))?\s+)?(async\s+)?fn\s+{re.escape(name)}\b"
-        if language == "rust"
-        else rf"^\s*def\s+{re.escape(name)}\b"
-    )
+    def_pattern = _def_pattern_for(language, name)
     rg = _require("rg")
-    cmd = [rg, "-n", "--no-heading", "-t", "rust" if language == "rust" else "py", def_pattern, str(search_dir or repo_root)]
+    cmd = (
+        [rg, "-n", "--no-heading", "-t", _lang_config(language)["rg_type"]]
+        + _ripgrep_exclude_args(language)
+        + [def_pattern, str(search_dir or repo_root)]
+    )
     proc, elapsed = _run(cmd)
     results = []
     for line in proc.stdout.splitlines():
@@ -223,17 +344,13 @@ def ripgrep_find_definition(repo_root, name, language, search_dir=None):
 
 
 def grep_find_definition(repo_root, name, language, search_dir=None):
-    def_pattern = (
-        rf"^\s*(pub(\([^)]*\))?\s+)?(async\s+)?fn\s+{re.escape(name)}\b"
-        if language == "rust"
-        else rf"^\s*def\s+{re.escape(name)}\b"
-    )
+    def_pattern = _def_pattern_for(language, name)
     grep = _require("grep")
-    ext = _extension_for(language)
     args = ["-rnE"]
     for d in _exclude_dirs(language):
         args += [f"--exclude-dir={d}"]
-    args += [f"--include=*.{ext}"]
+    for ext in _extensions_for(language):
+        args += [f"--include=*.{ext}"]
     cmd = [grep] + args + [def_pattern, str(search_dir or repo_root)]
     proc, elapsed = _run(cmd)
     results = []
@@ -258,7 +375,8 @@ class CtagsIndex:
 
     def _build(self):
         ctags = _require("ctags")
-        cmd = [ctags, "-R", "--fields=+znKe", "-f", "-", str(self.search_dir)]
+        ctags_language = _lang_config(self.language)["ctags_language"]
+        cmd = [ctags, "-R", f"--languages={ctags_language}", "--fields=+znKe", "-f", "-", str(self.search_dir)]
         proc, elapsed = _run(cmd, timeout=180)
         self.build_time_s = elapsed
         self.command = " ".join(cmd)
@@ -296,9 +414,8 @@ class CtagsIndex:
                 rel = str(Path(file_part).resolve().relative_to(self.repo_root.resolve()))
             except ValueError:
                 continue
-            qname = f"{scope}::{name}" if (scope and self.language == "rust") else (
-                f"{scope}.{name}" if scope else name
-            )
+            sep = _lang_config(self.language)["qualified_sep"]
+            qname = f"{scope}{sep}{name}" if scope else name
             record = {
                 "name": name,
                 "qualified_name": qname,

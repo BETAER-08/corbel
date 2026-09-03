@@ -35,13 +35,69 @@ def resolve_repo_path(golden_set):
     return p.resolve()
 
 
+
+# Paths under these directories are corbel's own index artifacts, never
+# golden-set source; a commit mismatch caused only by changes here (or by no
+# tracked changes at all) does not affect what the golden set measures.
+KNOWN_ARTIFACT_DIRS = (".corbel/",)
+
+
 def verify_commit(golden_set, repo_path):
     expected = golden_set["commit"]
     proc = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=repo_path, capture_output=True, text=True
     )
     actual = proc.stdout.strip()
-    return actual, actual == expected
+    if actual == expected:
+        return actual, True, None
+
+    diff_proc = subprocess.run(
+        ["git", "diff", "--stat", expected, "HEAD"], cwd=repo_path, capture_output=True, text=True
+    )
+    if diff_proc.returncode != 0:
+        return actual, False, {
+            "diff_stat": None,
+            "changed_files": None,
+            "source_changed": None,
+            "detail": (
+                f"could not compute `git diff --stat {expected}..HEAD` (exit "
+                f"{diff_proc.returncode}): {diff_proc.stderr.strip()} - the pinned "
+                "commit may not exist in this checkout; do not treat this as "
+                "artifact-only drift"
+            ),
+        }
+    diff_stat = diff_proc.stdout
+    changed_files = [
+        line.split("|", 1)[0].strip()
+        for line in diff_stat.splitlines()
+        if "|" in line
+    ]
+    source_changed_files = [
+        f for f in changed_files if not f.startswith(KNOWN_ARTIFACT_DIRS)
+    ]
+    source_changed = bool(source_changed_files)
+    if source_changed:
+        detail = (
+            f"{len(source_changed_files)} source file(s) changed since the pinned "
+            f"commit: {source_changed_files[:10]}{'...' if len(source_changed_files) > 10 else ''} "
+            "- results are not comparable to the golden set; re-clone or re-pin before trusting this run"
+        )
+    elif changed_files:
+        detail = (
+            f"HEAD differs from the pinned commit but only artifact paths changed "
+            f"({changed_files}) - safe to re-pin, source is unaffected"
+        )
+    else:
+        detail = (
+            "HEAD differs from the pinned commit but `git diff --stat` shows no "
+            "changed files (e.g. a rebase/retag to an equivalent tree) - safe to re-pin"
+        )
+    return actual, False, {
+        "diff_stat": diff_stat,
+        "changed_files": changed_files,
+        "source_changed": source_changed,
+        "detail": detail,
+    }
 
 
 def task_ground_truth(task_value):
@@ -153,7 +209,7 @@ def run_caller_task(entry, repo_path, corbel_client, ctags_index, language, sear
     tool_runs["grep"] = (grep_raw, [metrics.caller_key(c) for c in grep_raw], t, meta)
 
     ct_raw, t, meta = ta.ctags_find_callers(repo_path, sym["name"], sym["file"], sym["line"], language, ctags_index, search_dir)
-    tool_runs["ctags"] = (ct_raw, [metrics.caller_key(c) for c in ct_raw], t, meta)
+    tool_runs["ripgrep+ctags"] = (ct_raw, [metrics.caller_key(c) for c in ct_raw], t, meta)
 
     return build_task_result(entry, "callers", ground_truth, truth_info["ground_truth"], tool_runs)
 
@@ -175,7 +231,7 @@ def run_callee_task(entry, repo_path, corbel_client, ctags_index, language, sear
     tool_runs["grep"] = (grep_raw, [metrics.callee_key(c) for c in grep_raw], t, meta)
 
     ct_raw, t, meta = ta.ctags_find_callees(repo_path, sym["name"], sym["file"], sym["line"], language, ctags_index)
-    tool_runs["ctags"] = (ct_raw, [metrics.callee_key(c) for c in ct_raw], t, meta)
+    tool_runs["ripgrep+ctags"] = (ct_raw, [metrics.callee_key(c) for c in ct_raw], t, meta)
 
     if truth_info["ambiguous"]:
         return {
@@ -256,7 +312,7 @@ def run_definition_task(entry, repo_path, corbel_client, ctags_index, language, 
     tool_runs["grep"] = (grep_raw, [metrics.definition_key(c) for c in grep_raw], t, meta)
 
     ct_raw, t, meta = ta.ctags_find_definition(sym["name"], ctags_index)
-    tool_runs["ctags"] = (ct_raw, [metrics.definition_key(c) for c in ct_raw], t, meta)
+    tool_runs["ripgrep+ctags"] = (ct_raw, [metrics.definition_key(c) for c in ct_raw], t, meta)
 
     return build_task_result(entry, "definition", ground_truth, ground_truth_raw, tool_runs)
 
@@ -277,7 +333,7 @@ def collect_tool_versions():
     }
 
 
-def run_repo(golden_set, corbel_binary):
+def run_repo(golden_set, corbel_binary, include_callees=False):
     repo_path = resolve_repo_path(golden_set)
     if not repo_path.exists():
         raise FileNotFoundError(
@@ -285,7 +341,7 @@ def run_repo(golden_set, corbel_binary):
             f"clone it first (clone_url: {golden_set.get('clone_url')})"
         )
 
-    actual_commit, commit_ok = verify_commit(golden_set, repo_path)
+    actual_commit, commit_ok, commit_mismatch_detail = verify_commit(golden_set, repo_path)
 
     language = golden_set["language"]
     search_root = golden_set.get("search_root", ".")
@@ -308,7 +364,7 @@ def run_repo(golden_set, corbel_binary):
                 r = run_caller_task(entry, repo_path, corbel_client, ctags_index, language, search_dir, search_root)
                 if r:
                     task_results.append(r)
-            if "callees" in tasks:
+            if "callees" in tasks and include_callees:
                 r = run_callee_task(entry, repo_path, corbel_client, ctags_index, language, search_dir, search_root)
                 if r:
                     task_results.append(r)
@@ -325,23 +381,36 @@ def run_repo(golden_set, corbel_binary):
         "expected_commit": golden_set["commit"],
         "actual_commit": actual_commit,
         "commit_matches": commit_ok,
+        "commit_mismatch_detail": commit_mismatch_detail,
         "search_root": search_root,
         "search_root_note": golden_set.get("search_root_note"),
         "corbel_index_seconds": index_time,
         "corbel_index_summary": index_stdout,
         "ctags_build_seconds": ctags_build_time,
         "benchmark_token_budget": ta.BENCHMARK_TOKEN_BUDGET,
+        "callees_task_included": include_callees,
         "task_results": task_results,
         "truncated_cases": truncated_cases,
     }
 
 
 def main():
-    parser = argparse.ArgumentParser(description="corbel vs grep/ripgrep/ctags benchmark harness")
+    parser = argparse.ArgumentParser(description="corbel vs grep/ripgrep/ripgrep+ctags benchmark harness")
     parser.add_argument("--golden-dir", default=str(DEFAULT_GOLDEN_DIR))
     parser.add_argument("--results-dir", default=str(DEFAULT_RESULTS_DIR))
     parser.add_argument("--corbel-binary", default=str(DEFAULT_CORBEL_BINARY))
     parser.add_argument("--repo", action="append", default=None, help="restrict to one repo name (repeatable)")
+    parser.add_argument(
+        "--include-callees",
+        action="store_true",
+        help=(
+            "run the callees (T2) task. Off by default: ~90%% of golden-set callees "
+            "ground truth is currently empty (2/55 chevrotain, 2/33 hyperfine, 4/21 "
+            "itsdangerous non-empty), so every tool's precision/recall on this task "
+            "mostly reflects grading against 'no answer', not tool capability. "
+            "Re-enable once the golden set's callees ground truth is filled in."
+        ),
+    )
     args = parser.parse_args()
 
     corbel_binary = Path(args.corbel_binary)
@@ -363,7 +432,7 @@ def main():
     repo_results = []
     for golden_set in golden_sets:
         print(f"running benchmark for {golden_set['repo']}...", file=sys.stderr)
-        repo_results.append(run_repo(golden_set, corbel_binary))
+        repo_results.append(run_repo(golden_set, corbel_binary, include_callees=args.include_callees))
 
     all_truncated_cases = [
         case for repo_result in repo_results for case in repo_result["truncated_cases"]
@@ -375,6 +444,14 @@ def main():
         "tool_versions": tool_versions,
         "benchmark_token_budget": ta.BENCHMARK_TOKEN_BUDGET,
         "benchmark_token_budget_rationale": ta.BENCHMARK_TOKEN_BUDGET_RATIONALE,
+        "callees_task_included": args.include_callees,
+        "callees_task_exclusion_reason": (
+            None if args.include_callees else
+            "callees (T2) excluded by default: ~90% of golden-set callees ground "
+            "truth is empty (2/55 chevrotain, 2/33 hyperfine, 4/21 itsdangerous "
+            "non-empty), so scoring it grades tools against 'no answer' rather than "
+            "against real ground truth. Pass --include-callees to run it anyway."
+        ),
         "repos": repo_results,
         "truncated_cases": all_truncated_cases,
     }

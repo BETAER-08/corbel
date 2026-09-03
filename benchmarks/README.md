@@ -22,15 +22,25 @@ to `benchmarks/results/`. Never commit the contents of either directory.
 - `harness/` — the measurement harness, pure Python 3 standard library, no
   third-party dependencies.
   - `enclosing.py` — regex/indentation-based "which function contains this
-    line" resolver, used by the grep and ripgrep adapters.
+    line" resolver, used by the grep and ripgrep adapters. Supports Rust,
+    Python, and TypeScript/TSX/JavaScript (`TS_JS_LIMITATIONS.md` documents
+    what the TS/JS heuristic intentionally does not catch).
   - `tool_adapters.py` — one adapter per tool (corbel via its MCP `serve`
-    protocol over stdin/stdout, ripgrep, grep, and universal-ctags via its
-    `--fields=+znKe` scope/end-line output).
+    protocol over stdin/stdout, ripgrep, grep, and a `ripgrep+ctags` hybrid —
+    see "What's actually being compared" below). All language-specific
+    behavior (keywords, excluded directories, file extensions, ripgrep's
+    `-t` type name, ctags' `--languages` name, and the definition-search
+    regex) lives in one table, `LANGUAGES` in `tool_adapters.py`; add a
+    language by adding one entry there.
+  - `TS_JS_LIMITATIONS.md` — what the TS/JS regex-based definition matching
+    and enclosing-scope resolution do not catch (generic type parameters,
+    multi-line signatures, interface method signatures, etc).
   - `metrics.py` — multiset precision/recall/F1.
   - `report.py` — renders the run to Markdown and JSON.
   - `run_benchmark.py` — CLI entry point that ties it together.
   - `test_tool_adapters.py` — regression tests for the corbel adapter's
-    truncation handling. Run with `python3 benchmarks/harness/test_tool_adapters.py`;
+    truncation handling and for TS/JS language support (`TypeScriptAdapterTests`).
+    Run with `python3 benchmarks/harness/test_tool_adapters.py`;
     skips the live-corbel tests automatically if `target/{release,debug}/corbel`
     hasn't been built.
 
@@ -82,10 +92,19 @@ Each golden set file pins the exact commit it was verified against
 (`commit`). The harness checks the repository's actual `HEAD` against that
 pinned commit and records a mismatch warning in the report if they diverge —
 clone once and do not update the OSS repos in place, or the golden set no
-longer describes the code being measured.
+longer describes the code being measured. On mismatch, `verify_commit` (in
+`run_benchmark.py`) also runs `git diff --stat <pinned>..HEAD` and reports
+whether any *source* file changed (as opposed to only paths under
+`.corbel/`, corbel's own index artifact directory): `commit_mismatch_detail`
+in the JSON report, and an extra line under "Commit match" in the Markdown
+report, tell you whether the mismatch is source drift (results are not
+trustworthy, re-clone or re-pin) or artifact-only drift (safe to re-pin)
+without a manual `git diff` investigation.
 
 Use `--repo corbel`, `--repo hyperfine`, or `--repo itsdangerous` (repeatable)
-to run a subset. Results are written as both
+to run a subset. Pass `--include-callees` to also run the callees (T2) task,
+which is excluded by default — see "What's actually being compared" below.
+Results are written as both
 `benchmarks/results/benchmark-<timestamp>.{md,json}` and
 `benchmarks/results/latest.{md,json}`.
 
@@ -95,7 +114,7 @@ For every golden entry, all four tools are asked the same question — callers
 of a known (name, file, line), callees of it, or where a bare name is
 defined — using each tool's realistic best-practice usage (ripgrep/grep with
 word-boundary patterns plus indentation-based enclosing-function detection;
-ctags with its own scope/end-line fields; corbel via `get_symbol`). Every
+a `ripgrep+ctags` hybrid; corbel via `get_symbol`). Every
 run's report includes: an aggregate precision/recall/F1/time table per
 repository, a full per-entry breakdown, and a `corbel failure causes` table
 that buckets every scored corbel miss or false positive by root cause
@@ -104,12 +123,43 @@ that buckets every scored corbel miss or false positive by root cause
 `dynamic_dispatch_no_static_target`, `high_fan_in_*`, or a residual
 `other_*` bucket) rather than a single win/loss number.
 
+**Why `ripgrep+ctags`, not plain ctags.** Plain universal-ctags has no
+call-site index, so it cannot answer the callers task at all — labeling that
+"ctags" and reporting a bare 0 would be a strawman, and doesn't reflect how
+developers actually use ctags in practice (paired with grep/ripgrep for call
+sites, ctags for scope). Concretely: `ctags_find_callers` in
+`tool_adapters.py` uses ripgrep (or grep as a fallback) to find call sites,
+then uses `CtagsIndex` only to resolve which function/method each hit falls
+inside (its scope) via ctags' `--fields=+znKe` scope/end-line output.
+`ctags_find_callees` likewise uses ctags only for the function's end-line
+boundary, then the same regex-based callee scanner every other adapter uses.
+`ctags_find_definition` is the one task answered by ctags alone (a direct
+tag-table lookup by name) — so it is the one row where this hybrid's numbers
+are actually plain-ctags numbers.
+
 Entries whose ground truth is genuinely ambiguous (dynamic dispatch / duck
 typing with no single correct static target) are marked `ambiguous` in the
 golden set and reported separately as a qualitative side-by-side of what each
 tool actually returned — they are excluded from the scored aggregate tables
 because there is no static answer to grade against, not because corbel or any
 other tool "won" or "lost" there.
+
+## Why the callees (T2) task is excluded by default
+
+`run_benchmark.py` skips the callees task unless `--include-callees` is
+passed. Reason: across the three current golden sets, callees ground truth
+is non-empty for only 2/55 chevrotain entries, 2/33 hyperfine entries, and
+4/21 itsdangerous entries — roughly 90% of scored callees tasks have an
+empty expected answer (a leaf function that calls nothing). Scoring those
+grades every tool on "did you correctly return nothing," not on real
+retrieval capability, and a precision/recall of 0.000 across the board on
+this task reads as "every tool failed" when the actual cause is an
+underpopulated golden set, not tool failure. The code is not deleted — pass
+`--include-callees` to run it, and the JSON report's top-level
+`callees_task_included` / `callees_task_exclusion_reason` fields (and a
+banner at the top of the Markdown report) record whether and why it was
+skipped, so this is never a silent omission. Re-enable it once the golden
+set's callees ground truth is filled in.
 
 ## Why accuracy runs can't use corbel's default token budget
 
