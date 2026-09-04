@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.0] - 2026-09-XX
+## [0.2.0] - 2026-09-04
 
 ### Added
 
@@ -64,7 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   crates.io for 0.1.0 can't be fixed retroactively. 0.1.0 users should use
   `cargo install corbel` or the 0.2.0 install script instead.
 
-## [0.1.0] - 2026-08-30
+## [0.1.0] - 2026-08-31
 
 ### Added
 
