@@ -4,7 +4,7 @@ exclude = ["benchmarks/repos/hyperfine", "benchmarks/repos/itsdangerous"]
 resolver = "3"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -14,8 +14,8 @@ readme = "README.md"
 authors = ["BETAER"]
 
 [workspace.dependencies]
-corbel-core = { version = "0.1.0", path = "crates/corbel-core" }
-corbel-lang = { version = "0.1.0", path = "crates/corbel-lang" }
+corbel-core = { version = "0.2.0", path = "crates/corbel-core" }
+corbel-lang = { version = "0.2.0", path = "crates/corbel-lang" }
 anyhow = "1.0.104"
 thiserror = "2.0.19"
 serde = { version = "1.0.229", features = ["derive"] }

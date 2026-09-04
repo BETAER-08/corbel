@@ -278,7 +278,10 @@ mod tests {
         let parsed: Value = serde_json::from_str(&response).unwrap();
         let text = parsed["result"]["content"][0]["text"].as_str().unwrap();
         let payload: Value = serde_json::from_str(text).unwrap();
-        assert_eq!(payload["results"][0]["callers"][0]["name"], "Signer::unsign");
+        assert_eq!(
+            payload["results"][0]["callers"][0]["name"],
+            "Signer::unsign"
+        );
     }
 
     #[test]
