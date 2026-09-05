@@ -1,10 +1,8 @@
 # corbel
 
-corbel is a local **MCP server** that performs **static analysis** to build a resolved **call graph** of your codebase, so a coding agent can ask "what calls this?" and "what breaks if I change this?" without guessing. It is not AI-based — no model runs inside it, and it makes no probabilistic claims about your code. corbel is also the name of an architectural bracket, and unrelated to the Microsoft font of the same name.
+corbel is a local **MCP server** that performs **static analysis** to build a resolved **call graph** of your codebase, so a coding agent can ask "what calls this?" and "what breaks if I change this?" without guessing.
 
-*A corbel (/ˈkɔːrbəl/) is the bracket built into a wall that carries the load above it. corbel maps what carries what in your code.*
-
-corbel ships as a single static binary with no runtime dependencies, and your code never leaves the machine.
+*A corbel (/ˈkɔːrbəl/) is the bracket built into a wall that carries the load above it — corbel maps what carries what in your code. (Unrelated to the Microsoft font of the same name.)*
 
 ## The problem, in one real query
 
@@ -43,6 +41,8 @@ Six of those 11 calls are inside `test_format_duration_unit_basic` (one assertio
 
 ## Install
 
+corbel ships as a single static binary with no runtime dependencies, and your code never leaves the machine.
+
 ```
 cargo install corbel
 ```
@@ -61,14 +61,16 @@ powershell -ExecutionPolicy ByPass -c "irm https://github.com/BETAER-08/corbel/r
 
 ## Claude Code, in three steps
 
-```
-corbel index .
-claude mcp add corbel -- corbel serve
-```
-
-Then ask a refactoring question in plain language — the agent calls `get_symbol`/`impact`/`find` on its own:
-
-> "If I change `resolve_all`, what else needs to change?"
+1. Index the repo:
+   ```
+   corbel index .
+   ```
+2. Register corbel as an MCP server:
+   ```
+   claude mcp add corbel -- corbel serve
+   ```
+3. Ask a refactoring question in plain language — the agent calls `get_symbol`/`impact`/`find` on its own:
+   > "If I change `resolve_all`, what else needs to change?"
 
 For other MCP clients, add corbel directly to the server config:
 
@@ -198,40 +200,59 @@ python3 benchmarks/harness/run_benchmark.py
 
 Measured on real open-source repositories, not accuracy-scored. Full methodology: [benchmarks/results/perf-20260904.md](benchmarks/results/perf-20260904.md).
 
-| Symbols | Repo | Cold index | `find` p50 / p99 |
-| --- | --- | --- | --- |
-| 8,145 | tokio | 9.6s | 1.1 / 1.4ms |
-| 31,849 | bevy | 27.7s | 4.9 / 5.8ms |
-| 112,940 | TypeScript compiler | 282s | 15.0 / 16.9ms |
-| 116,870 | servo | 566s | 31.7 / 122ms |
+| Symbols | Repo | Cold index | `find` p50 / p99 | Peak RSS |
+| --- | --- | --- | --- | --- |
+| 8,145 | tokio | 9.6s | 1.1 / 1.4ms | 8.3 MB |
+| 31,849 | bevy | 27.7s | 4.9 / 5.8ms | 8.2 MB |
+| 112,940 | TypeScript compiler | 282s | 15.0 / 16.9ms | 12.1 MB |
+| 116,870 | servo | 566s | 31.7 / 122ms | 8.4 MB |
 
-- **Cold-index time is super-linear** (exponent ≈2.3 between the 32K and 110K+ tiers). The driver isn't symbol count: servo and the TypeScript compiler have almost the same symbol count, but servo takes 2x longer because it has 5.8x more name-collision call sites (164,043 vs 28,282) — the bare-name resolution lookup, not indexing itself, is the bottleneck.
-- **`find` runs two full-table scans per call** (`LIKE '%query%'`, a leading wildcard that can't use the name index) — negligible under ~32K symbols, 15-32ms typical past 110K, p99 up to 122ms. The threshold that matters isn't a symbol count, it's call frequency: a workflow issuing several `find` calls per task feels this before any single call does.
-- **Peak memory stays flat** (8.4-12.3MB) regardless of repo size — time and tail latency are the constraint, not memory.
-- `impact` has no depth parameter (always walks to depth 10 or budget exhaustion) — depth-3-specific latency wasn't measurable and is reported as such, not approximated.
-- Only one cold-index run, not three, at the 100K+ tier — a single run cost 9-10 minutes, making repeated averaging impractical in itself. `rust-lang/rust` was not attempted.
+- **Cold-index time is super-linear**: exponent ≈2.3 between the 32K and 110K+ tiers.
+- **The driver is name collisions, not symbol count.** servo and the TypeScript compiler have almost the same symbol count, but servo takes 2x longer to index because it has 5.8x more name-collision call sites (164,043 vs 28,282) — bare-name resolution, not indexing, is the bottleneck.
+- **`find` does two full-table scans per call** (`LIKE '%query%'` can't use the name index): negligible under ~32K symbols, 15-32ms typical past 110K.
+- **Call frequency matters more than symbol count for `find`**: a workflow issuing several `find` calls per task feels this before any single call does.
+- **Peak memory is flat regardless of repo size** (see table above) — time and tail latency are the scaling constraint, not memory.
+- **`impact` has no depth parameter**: it always walks to depth 10 or budget exhaustion, so depth-3-specific latency isn't measurable and isn't approximated here.
+- **Only one cold-index run, not three, at the 100K+ tier**: a single run cost 9-10 minutes, making repeated averaging impractical. `rust-lang/rust` was not attempted.
 
 ## Methodology
 
-corbel's own output was never used to build the golden set — `candidate_scanner.py`, which selects candidate symbols, doesn't import corbel; this is a structural guarantee, not a policy. Every one of 120 entries was verified by a single AI model (Claude Sonnet 5) reading source directly, cross-checked against ripgrep-enumerated candidates and an LSP server's draft answer — **there is no human review of individual entries**, disclosed here because it matters, not because it's flattering. The LSP cross-check itself produced 6 distinct classes of wrong answers, catalogued rather than trusted blindly: [LSP_ERROR_TYPES.md](benchmarks/goldenset/LSP_ERROR_TYPES.md). Text-search overcounting (the `.iter(` example above and others, up to 31x) is catalogued the same way: [TEXT_SEARCH_LIMITATIONS.md](benchmarks/goldenset/TEXT_SEARCH_LIMITATIONS.md). The 12 hardest (`adversarial`) entries got a second, independently-derived verification pass from a context-isolated subagent that never saw the first pass's reasoning.
+- **corbel wasn't used to build the golden set.** `candidate_scanner.py` selects candidate symbols without importing corbel — a structural guarantee, not a policy.
+- **120 entries, one AI verifier, no human review.** Every entry was checked by a single model (Claude Sonnet 5), not a person — disclosed because it matters, not because it's flattering.
+- **Cross-checked three ways**: ripgrep-enumerated candidates, an LSP server's draft answer, and direct reading of the source.
+- **The LSP cross-check surfaced 6 distinct classes of wrong answers**, catalogued rather than trusted blindly: [LSP_ERROR_TYPES.md](benchmarks/goldenset/LSP_ERROR_TYPES.md).
+- **Text search overcounts by up to 31x** in this benchmark's own repos (the `.iter(` example above and others), catalogued the same way: [TEXT_SEARCH_LIMITATIONS.md](benchmarks/goldenset/TEXT_SEARCH_LIMITATIONS.md).
+- **The 12 hardest ("adversarial") entries got a second pass**: a context-isolated subagent re-verified them independently, without seeing the first pass's reasoning.
 
 Full methodology, including what the single-verifier limitation does and doesn't compensate for: [benchmarks/README.md](benchmarks/README.md).
 
 ## Known limitations
 
-corbel resolves what static analysis can prove and refuses to guess at the rest. On its own source (796 symbols, 5481 references at time of writing), 93.3% of internal calls resolve; the remaining 6.7% are calls where more than one definition shares a name and nothing in scope disambiguates them, so corbel marks them `unresolved (ambiguous)` rather than picking one.
+corbel resolves what static analysis can prove and refuses to guess at the rest. On its own source (796 symbols, 5,481 references at time of writing), 93.3% of internal calls resolve. The rest are name collisions with nothing in scope to disambiguate, marked `unresolved (ambiguous)` rather than guessed.
 
-Cases that are structurally out of reach for static analysis, by design, in every supported language:
+**Structurally out of reach for static analysis, by design, in every supported language:**
 
-- **Dynamic dispatch** — trait objects (Rust), duck-typed calls (Python), calls through an interface-typed value (TypeScript) — has no statically-determined target. corbel reports these as `external` or `unresolved`, never a fabricated edge.
-- **Macro-generated code** (Rust `macro_rules!`/derive output, decorators that rewrite call sites) is invisible to corbel's tree-sitter-based extraction if the macro expansion isn't present in source form. Checked, not just claimed: across every measured failure in the golden set's three repos, **zero** were traced to a macro-generated call site — a confirmed absence, not a category we didn't look for.
-- **JavaScript/TypeScript CommonJS `require(...)`** doesn't populate an import entry, so a call reached only through a `require`-bound name can resolve less precisely than the same call reached through `import`.
-- **`find`'s substring query** (`%query%`) cannot use the symbol-name index — every call does a full scan of the `symbols` table. Negligible under ~32K symbols, 15-32ms typical past 110K (see Performance above).
-- **Standard library and external crate/package calls** are outside the index entirely and reported as `external` — corbel does not resolve into dependencies.
+| Limitation | Why | Evidence |
+| --- | --- | --- |
+| Dynamic dispatch (trait objects, duck typing, interface-typed calls) | No statically-determined target exists | Reported as `external` or `unresolved`, never a fabricated edge |
+| Macro-generated code (Rust `macro_rules!`/derive, call-site-rewriting decorators) | Invisible to tree-sitter extraction if the expansion isn't present in source form | Checked, not assumed: **zero** of the golden set's measured failures traced to a macro-generated call site |
+| JavaScript/TypeScript CommonJS `require(...)` | Doesn't populate an import entry | A call reached only via `require` resolves less precisely than the same call via `import` |
+| `find`'s substring query (`%query%`) | Can't use the symbol-name index; full table scan every call | Negligible under ~32K symbols, 15-32ms typical past 110K (see [Performance](#performance-at-scale)) |
+| Standard library / external crate or package calls | Outside the index entirely | Reported as `external`; corbel does not resolve into dependencies |
 
-**Measured breakdown of corbel's actual misses** (603 classified failures, callers + definition tasks): 13.4% name collision (a bare-name lookup limitation shared by every tool measured here, not corbel-specific), 6.8% dynamic dispatch, 2.3% a runtime prototype-assembly pattern (`chevrotain`'s `applyMixins`, which does `derivedCtor.prototype[key] = baseCtor.prototype[key]` at runtime — invisible to static analysis by construction), 0.8% duck typing. Full breakdown: [analysis](benchmarks/results/benchmark-20260903T142000Z-analysis.md).
+**Measured breakdown of corbel's actual misses** (603 classified failures, callers + definition tasks):
 
-Name collision, concretely: [pallets/itsdangerous](https://github.com/pallets/itsdangerous) at `672971d6` defines `__init__` 13 times across its class hierarchy. `get_symbol("__init__")` with no `file`/`line` to disambiguate returns all 13 — corbel narrows by name, not by which class you meant, same as any bare-name index would:
+| Cause | Share |
+| --- | --- |
+| Name collision (a bare-name lookup limit shared by every tool measured, not corbel-specific) | 13.4% |
+| Dynamic dispatch | 6.8% |
+| Runtime prototype assembly (`chevrotain`'s `applyMixins`, assigns prototype methods at runtime — invisible to static analysis by construction) | 2.3% |
+| Duck typing | 0.8% |
+
+Full breakdown: [analysis](benchmarks/results/benchmark-20260903T142000Z-analysis.md).
+
+**Name collision, concretely**: [pallets/itsdangerous](https://github.com/pallets/itsdangerous) at `672971d6` defines `__init__` 13 times across its class hierarchy.
+`get_symbol("__init__")` with no `file`/`line` to disambiguate returns all 13 — corbel narrows by name, not by which class you meant, same as any bare-name index would:
 
 ```
 $ corbel index . && echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_symbol","arguments":{"name":"__init__"}}}' | corbel serve .
@@ -240,11 +261,13 @@ $ corbel index . && echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params"
 
 Pass `file` (and `line`, if the file still has more than one match) — exactly what `find`'s results give you — to get exactly one.
 
-**A real, unfixed bug**: a Rust method defined as a trait's *default method body* (`trait Foo { fn bar(&self) { ... } }`, not inside an `impl` block) doesn't get an owner-qualified caller name — `owner_of_definition` walks up looking for `impl_item` and never checks for an enclosing `trait_item`. 3 occurrences in the benchmark (`MarkupExporter::table_results` in hyperfine). Narrow, but real, and listed here rather than folded into the percentages above.
+**A real, unfixed bug**: a Rust method defined as a trait's *default method body* (`trait Foo { fn bar(&self) { ... } }`, not inside an `impl` block) doesn't get an owner-qualified caller name.
+`owner_of_definition` walks up looking for `impl_item` and never checks for an enclosing `trait_item`. 3 occurrences in the benchmark (`MarkupExporter::table_results` in hyperfine) — narrow, but real, and listed here rather than folded into the percentages above.
 
 **Cases where every tool measured — corbel, grep, ripgrep, and the ripgrep+ctags hybrid — gets the same answer wrong:**
 - `for x in iter` desugars to repeated `Iterator::next()` calls with no `.next()` text anywhere in source. No tool here does implicit-desugaring analysis; all four fail identically — a shared ceiling, not a corbel gap.
-- Five `chevrotain` entries (`findEndOfInputAnchor` and four siblings) appear to have an incorrect golden-set answer: their real sole caller is `validateRegExpPattern`, but the golden set records `validatePatterns` (one level further out). All four tools agree on `validateRegExpPattern` and are uniformly scored wrong against it. **This was not corrected in the golden set** — the entries stand as originally verified, flagged here instead, so a scoring artifact doesn't get fixed quietly after the fact.
+- Five `chevrotain` entries (`findEndOfInputAnchor` and four siblings) appear to have an incorrect golden-set answer: their real sole caller is `validateRegExpPattern`, but the golden set records `validatePatterns` (one level further out).
+  All four tools agree on `validateRegExpPattern` and are uniformly scored wrong against it. **This was not corrected in the golden set** — the entries stand as originally verified, flagged here instead, so a scoring artifact doesn't get fixed quietly after the fact.
 
 ## License and boundaries
 
@@ -257,6 +280,8 @@ Indexing and querying your own codebase — the entire tool as it exists today �
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow, the language-promotion gates, and the schema-migration rules. Every commit must carry a DCO sign-off (`git commit -s`).
 
 ## Privacy
+
+corbel is not AI-based: no model runs inside it, and it makes no probabilistic claims about your code.
 
 corbel never sends your code anywhere. Indexing and querying run entirely offline; the binary contains no network code. What an agent sends to its model is between the agent and its MCP client — corbel itself never touches the network.
 
