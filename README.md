@@ -232,13 +232,15 @@ corbel resolves what static analysis can prove and refuses to guess at the rest.
 
 **Structurally out of reach for static analysis, by design, in every supported language:**
 
-| Limitation | Why | Evidence |
+| Limitation | Why | How corbel handles it |
 | --- | --- | --- |
 | Dynamic dispatch (trait objects, duck typing, interface-typed calls) | No statically-determined target exists | Reported as `external` or `unresolved`, never a fabricated edge |
-| Macro-generated code (Rust `macro_rules!`/derive, call-site-rewriting decorators) | Invisible to tree-sitter extraction if the expansion isn't present in source form | Checked, not assumed: **zero** of the golden set's measured failures traced to a macro-generated call site |
+| Macro-generated code (Rust `macro_rules!`/derive, call-site-rewriting decorators) | Invisible to tree-sitter extraction if the expansion isn't present in source form | Silently absent from the call graph — no edge is created, fabricated or otherwise |
 | JavaScript/TypeScript CommonJS `require(...)` | Doesn't populate an import entry | A call reached only via `require` resolves less precisely than the same call via `import` |
-| `find`'s substring query (`%query%`) | Can't use the symbol-name index; full table scan every call | Negligible under ~32K symbols, 15-32ms typical past 110K (see [Performance](#performance-at-scale)) |
+| `find`'s substring query (`%query%`) | Can't use the symbol-name index; full table scan every call | Same result, just slower — no call has ever failed from this, only added latency |
 | Standard library / external crate or package calls | Outside the index entirely | Reported as `external`; corbel does not resolve into dependencies |
+
+This table is about mechanism — why each case can't be resolved and what corbel does instead — not about how often it happens. Two of these are separately measured: macro-generated code (**zero** of the golden set's measured failures traced to a macro-generated call site) and `find`'s scan cost (negligible under ~32K symbols, 15-32ms typical past 110K — full numbers in [Performance](#performance-at-scale)). Dynamic dispatch's actual failure rate is measured too, but that number belongs to the table below, which is about frequency, not mechanism:
 
 **Measured breakdown of corbel's actual misses** (603 classified failures, callers + definition tasks):
 
