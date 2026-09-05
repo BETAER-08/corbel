@@ -148,7 +148,7 @@ Examples below are all real responses against the same pinned repo as above ([sh
 | TSX | full | Adds JSX-tag references on top of TypeScript's resolution. |
 | JavaScript | full | Shares TypeScript's resolution machinery. CommonJS `require(...)` produces no import entry — only ES-module `import`/`export` is scope-aware. |
 
-Every language above runs through the same five-stage resolution chain, implemented once and shared by all of them: **same-file → scoped → global-unique → external → unresolved**. See [docs/language-support.md](docs/language-support.md) for the promotion criteria new languages must clear.
+Every language above resolves to the same five outcomes, via logic implemented once and shared by all of them: **same-file, scoped, global-unique, external, unresolved** (`scoped` and `global-unique` are the same index-wide-uniqueness check with different labels, not sequential stages — see [docs/mcp-tools.md](docs/mcp-tools.md)). See [docs/language-support.md](docs/language-support.md) for the promotion criteria new languages must clear.
 
 ## Measured accuracy
 

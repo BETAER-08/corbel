@@ -10,12 +10,15 @@
 | TSX        | full  | `langs/tsx.rs` — reuses TypeScript's `symbol_kind`/`extract_signature`/`build_scope`/`enclosing_definition_name`, overrides `extract_references` to add JSX-tag references. |
 | JavaScript | full  | `langs/javascript.rs` — reuses TypeScript's `symbol_kind`/`extract_signature`/`build_scope`/`enclosing_definition_name`, overrides `extract_references` to add JSX-tag references, same as TSX. Known gap: `build_scope` only walks `import_statement`/`export_statement`, so CommonJS `require(...)` calls produce no import entry (verified by `commonjs_require_does_not_produce_an_import_entry` in `tests/javascript_tests.rs`); this doesn't lower the tier because the same ES-module-only scope walker is shared verbatim with TypeScript/TSX. |
 
-The five-stage resolution chain (same-file, scoped, global-unique, external,
-unresolved) is implemented once in `corbel-core/src/resolve.rs`
-(`resolve_all`) and is language-agnostic: it reads only the generic
+The five resolution outcomes (same-file, scoped, global-unique, external,
+unresolved) are produced once in `corbel-core/src/resolve.rs`
+(`resolve_all`) and are language-agnostic: it reads only the generic
 `symbols`/`imports`/`relationships` tables and never branches on source
-language, so all five stages apply identically to every registered
-language above.
+language, so all five outcomes apply identically to every registered
+language above. `scoped` and `global-unique` are not sequential stages of
+this logic — both come from the same index-wide-uniqueness check, and the
+label only records whether the caller's file imports the matched name (see
+docs/mcp-tools.md).
 
 `LanguageSupport` is frozen based on five languages clearing it end to end.
 JavaScript confirmed the contract rather than changing it, since it shares a

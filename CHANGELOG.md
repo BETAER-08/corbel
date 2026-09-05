@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+
+- Corrected `resolution` field docs (architecture.md, mcp-tools.md, tool
+  descriptions, README, CHANGELOG 0.1.0 entry): `scoped` and `global-unique`
+  were described as sequential stages of an import-following resolver. They
+  are actually the same check (a single same-named definition exists
+  index-wide); the label only reports whether the caller's file has a
+  matching import statement, which is never used to pick or disambiguate
+  the definition. No resolution behavior changed — only the description of
+  existing behavior. Agents relying on `scoped` to mean "found via the
+  import" should stop; see docs/mcp-tools.md for the corrected semantics.
+
 ## [0.2.0] - 2026-09-04
 
 ### Added
@@ -72,8 +84,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gitignore-aware file walking, and the SQLite-backed store (schema +
   migrations).
 - Indexing pipeline: parses each file, stores symbols and imports, then
-  resolves every call through same-file → scoped-import → global-unique →
-  external → unresolved, in that order.
+  resolves every call to one of same-file, scoped, global-unique, external,
+  or unresolved. (Docs corrected 2026-09-06: `scoped` and `global-unique` are
+  the same index-wide-uniqueness check, not sequential stages — the label
+  only reports whether the caller's file imports that name. See
+  docs/mcp-tools.md.)
 - `corbel index` CLI command, reporting files indexed and internal
   resolution rate.
 - Language support for Rust, Python, TypeScript, TSX, and JavaScript,
