@@ -6,6 +6,28 @@ includes a `resolution` field describing how references were resolved and a
 budget. `find` is a name search, not a call-graph query, and its response
 shape is documented separately below.
 
+## `resolution` values
+
+| Value           | Guarantees                                                                 | Does not guarantee |
+| --------------- | --------------------------------------------------------------------------- | ------------------- |
+| `same-file`     | A definition with this name exists in the caller's own file.                | — |
+| `scoped`        | Exactly one definition with this name exists anywhere else in the index, **and** the caller's file has an import statement whose local name or last path segment matches it. | That the import was followed to find the definition — it wasn't. The lookup is name-based and index-wide; the import is only checked to pick this label over `global-unique`. Does not disambiguate: if more than one definition shared the name, this reference would be `unresolved` regardless of the import. |
+| `global-unique` | Exactly one definition with this name exists anywhere else in the index.    | Any relationship between the caller and that definition beyond the name matching uniquely. |
+| `external`      | No definition with this name exists anywhere in the index (e.g. a call into a third-party dependency or the standard library). | — |
+| `unresolved`    | More than one definition with this name exists outside the caller's file, so no single target could be chosen. | — |
+
+`scoped` and `global-unique` come from the same underlying lookup (a unique
+index-wide candidate); the label difference reflects only whether an import
+for that name is present in the caller's file, not whether that import was
+used to find the definition. The import check itself is biased toward
+Rust-style paths: it splits `source_path` on `::` to get a last segment to
+compare against the callee name, so in languages without `::`-delimited
+import paths (Python, TypeScript, JavaScript) a `source_path` match rarely
+fires and `scoped` is reached almost entirely through a `local_name` match
+instead. This is a known limitation of the current implementation, not an
+import-graph resolver — treat `scoped` as "single global match, name also
+imported here," not as "resolved by following the import."
+
 ## Transport rules
 
 `stdout` carries the MCP protocol exclusively. All logs and diagnostics are

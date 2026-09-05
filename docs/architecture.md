@@ -46,9 +46,21 @@ A reference is resolved by walking a fixed chain and stopping at the first stage
 that yields a unique definition:
 
 1. `same-file` — a definition in the same file.
-2. `scoped` — a definition reachable through the reference's lexical scope.
-3. `global-unique` — a single matching definition across the whole index.
-4. `unresolved` — no unique definition was found.
+2. `scoped` / `global-unique` — a single definition with that name exists
+   anywhere in the index. Both labels come from the same lookup (exactly one
+   candidate outside the caller's file); the label only reports whether the
+   caller's file has an import statement whose local name or last path
+   segment matches the reference. The import is *not* used to pick the
+   definition and does not disambiguate anything: if more than one candidate
+   exists, the reference is `unresolved` regardless of whether an import is
+   present. Because the import check compares against `last_segment`, which
+   splits only on `::`, this matching is effectively Rust-path-shaped —
+   in Python and TypeScript, where import paths don't use `::`, `scoped` can
+   only be reached via a `local_name` match, not a path match. This is a
+   known limitation, not an import-following resolver.
+3. `external` — no definition with that name exists anywhere in the index.
+4. `unresolved` — more than one same-named definition exists outside the
+   caller's file, so no unique target can be chosen.
 
 Every resolution records which stage produced it.
 

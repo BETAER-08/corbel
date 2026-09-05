@@ -84,7 +84,7 @@ For other MCP clients, add corbel directly to the server config:
 
 Examples below are all real responses against the same pinned repo as above ([sharkdp/hyperfine](https://github.com/sharkdp/hyperfine) at `f12f3d9f`) — clone it and run these yourself to check.
 
-**`get_symbol`** looks up a symbol by name and returns its definition (file, line, signature) plus everything that calls it and everything it calls. Every edge carries a `resolution` field explaining how corbel matched it to a specific definition. Real response, `get_symbol("format_duration_unit")`:
+**`get_symbol`** looks up a symbol by name and returns its definition (file, line, signature) plus everything that calls it and everything it calls. Every edge carries a `resolution` field naming which lookup stage matched it to a specific definition (see [docs/mcp-tools.md](docs/mcp-tools.md) for what each value does and doesn't guarantee). Real response, `get_symbol("format_duration_unit")`:
 
 ```json
 {
