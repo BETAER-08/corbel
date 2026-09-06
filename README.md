@@ -287,6 +287,8 @@ corbel is not AI-based: no model runs inside it, and it makes no probabilistic c
 
 corbel never sends your code anywhere. Indexing and querying run entirely offline; the binary contains no network code. What an agent sends to its model is between the agent and its MCP client — corbel itself never touches the network.
 
+With `--audit` (off by default), corbel also writes a local query log to `.corbel/audit.jsonl` — symbol names and file paths only, never source code, never leaves the machine.
+
 ## Non-goals
 
 corbel does not edit code, generate documentation, ship a web UI, read git history, scan for secrets, integrate with the Language Server Protocol, or collect telemetry.

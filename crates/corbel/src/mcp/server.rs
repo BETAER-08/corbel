@@ -1,7 +1,10 @@
 use std::io::{BufRead, Write};
+use std::path::PathBuf;
 
 use rusqlite::Connection;
 use serde_json::{Value, json};
+
+use corbel_core::audit::{self, AuditEvent};
 
 use crate::mcp::tools::{ToolCallError, call_find, call_get_symbol, call_impact, list_tools};
 
@@ -10,11 +13,15 @@ const LATEST_PROTOCOL_VERSION: &str = "2025-06-18";
 
 pub struct McpServer {
     conn: Connection,
+    audit_log_path: Option<PathBuf>,
 }
 
 impl McpServer {
-    pub fn new(conn: Connection) -> Self {
-        McpServer { conn }
+    pub fn new(conn: Connection, audit_log_path: Option<PathBuf>) -> Self {
+        McpServer {
+            conn,
+            audit_log_path,
+        }
     }
 
     pub fn run(&self, input: &mut dyn BufRead, output: &mut dyn Write) -> anyhow::Result<()> {
@@ -35,7 +42,8 @@ impl McpServer {
 
             tracing::debug!(request = trimmed, "received mcp request");
 
-            if let Some(response) = handle_line(trimmed, &self.conn) {
+            if let Some(response) = handle_line(trimmed, &self.conn, self.audit_log_path.as_deref())
+            {
                 tracing::debug!(response = %response, "sending mcp response");
                 writeln!(output, "{response}")?;
                 output.flush()?;
@@ -44,7 +52,48 @@ impl McpServer {
     }
 }
 
-fn handle_line(line: &str, conn: &Connection) -> Option<String> {
+fn record_audit_events(audit_log_path: &std::path::Path, tool_name: &str, payload: &Value) {
+    let targets: Vec<(&str, &str, u32)> = match tool_name {
+        "get_symbol" => payload["results"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|result| {
+                Some((
+                    result["name"].as_str()?,
+                    result["file"].as_str()?,
+                    result["line"].as_u64()? as u32,
+                ))
+            })
+            .collect(),
+        "impact" => payload["results"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|result| {
+                Some((
+                    result["target_name"].as_str()?,
+                    result["target_file"].as_str()?,
+                    result["target_line"].as_u64()? as u32,
+                ))
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+
+    for (name, file, line) in targets {
+        let event = AuditEvent::now(tool_name, name, file, line);
+        if let Err(err) = audit::append_event(audit_log_path, &event) {
+            tracing::warn!(error = %err, "failed to write audit log entry");
+        }
+    }
+}
+
+fn handle_line(
+    line: &str,
+    conn: &Connection,
+    audit_log_path: Option<&std::path::Path>,
+) -> Option<String> {
     let parsed: Result<Value, _> = serde_json::from_str(line);
     let value = match parsed {
         Ok(value) => value,
@@ -72,7 +121,7 @@ fn handle_line(line: &str, conn: &Connection) -> Option<String> {
         "initialize" => Some(success_response(id, handle_initialize(&params))),
         "notifications/initialized" => None,
         "tools/list" => Some(success_response(id, json!({ "tools": list_tools() }))),
-        "tools/call" => Some(handle_tools_call(id, &params, conn)),
+        "tools/call" => Some(handle_tools_call(id, &params, conn, audit_log_path)),
         _ => {
             if has_id {
                 Some(error_response(
@@ -87,7 +136,12 @@ fn handle_line(line: &str, conn: &Connection) -> Option<String> {
     }
 }
 
-fn handle_tools_call(id: Value, params: &Value, conn: &Connection) -> String {
+fn handle_tools_call(
+    id: Value,
+    params: &Value,
+    conn: &Connection,
+    audit_log_path: Option<&std::path::Path>,
+) -> String {
     let tool_name = params.get("name").and_then(Value::as_str).unwrap_or("");
     let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
 
@@ -101,10 +155,22 @@ fn handle_tools_call(id: Value, params: &Value, conn: &Connection) -> String {
     };
 
     match result {
-        Ok(payload) => success_response(id, payload),
+        Ok(payload) => {
+            if let Some(audit_log_path) = audit_log_path {
+                if let Some(inner) = tool_response_payload(&payload) {
+                    record_audit_events(audit_log_path, tool_name, &inner);
+                }
+            }
+            success_response(id, payload)
+        }
         Err(ToolCallError::InvalidParams(message)) => error_response(id, -32602, &message),
         Err(ToolCallError::Internal(message)) => error_response(id, -32603, &message),
     }
+}
+
+fn tool_response_payload(response: &Value) -> Option<Value> {
+    let text = response["content"][0]["text"].as_str()?;
+    serde_json::from_str(text).ok()
 }
 
 fn handle_initialize(params: &Value) -> Value {
@@ -232,8 +298,12 @@ mod tests {
     #[test]
     fn tools_list_returns_get_symbol_impact_and_find() {
         let conn = empty_conn();
-        let response =
-            handle_line(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#, &conn).unwrap();
+        let response = handle_line(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
+            &conn,
+            None,
+        )
+        .unwrap();
         let parsed: Value = serde_json::from_str(&response).unwrap();
         let tools = parsed["result"]["tools"].as_array().unwrap();
         let names: Vec<&str> = tools
@@ -249,6 +319,7 @@ mod tests {
         let response = handle_line(
             r#"{"jsonrpc":"2.0","id":1,"method":"does/not/exist"}"#,
             &conn,
+            None,
         )
         .unwrap();
         let parsed: Value = serde_json::from_str(&response).unwrap();
@@ -261,6 +332,7 @@ mod tests {
         let response = handle_line(
             r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ghost"}}"#,
             &conn,
+            None,
         )
         .unwrap();
         let parsed: Value = serde_json::from_str(&response).unwrap();
@@ -273,6 +345,7 @@ mod tests {
         let response = handle_line(
             r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_symbol","arguments":{"name":"helper"}}}"#,
             &conn,
+            None,
         )
         .unwrap();
         let parsed: Value = serde_json::from_str(&response).unwrap();
@@ -290,6 +363,7 @@ mod tests {
         let response = handle_line(
             r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_symbol","arguments":{"name":"b"}}}"#,
             &conn,
+            None,
         )
         .unwrap();
         let parsed: Value = serde_json::from_str(&response).unwrap();
@@ -312,6 +386,7 @@ mod tests {
         let response = handle_line(
             r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_symbol","arguments":{"name":"b","token_budget":1}}}"#,
             &conn,
+            None,
         )
         .unwrap();
         let parsed: Value = serde_json::from_str(&response).unwrap();
@@ -333,6 +408,7 @@ mod tests {
         let response = handle_line(
             r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_symbol","arguments":{"name":"ghost"}}}"#,
             &conn,
+            None,
         )
         .unwrap();
         let parsed: Value = serde_json::from_str(&response).unwrap();
@@ -348,6 +424,7 @@ mod tests {
         let response = handle_line(
             r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_symbol","arguments":{}}}"#,
             &conn,
+            None,
         )
         .unwrap();
         let parsed: Value = serde_json::from_str(&response).unwrap();
@@ -360,6 +437,7 @@ mod tests {
         let response = handle_line(
             r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"impact","arguments":{"name":"b"}}}"#,
             &conn,
+            None,
         )
         .unwrap();
         let parsed: Value = serde_json::from_str(&response).unwrap();
@@ -377,6 +455,7 @@ mod tests {
         let response = handle_line(
             r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"impact","arguments":{"name":"b","token_budget":1}}}"#,
             &conn,
+            None,
         )
         .unwrap();
         let parsed: Value = serde_json::from_str(&response).unwrap();
@@ -391,6 +470,7 @@ mod tests {
         let response = handle_line(
             r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_symbol","arguments":{"name":"widget","file":"overload.rs"}}}"#,
             &conn,
+            None,
         )
         .unwrap();
         let parsed: Value = serde_json::from_str(&response).unwrap();
@@ -405,6 +485,7 @@ mod tests {
         let response = handle_line(
             r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_symbol","arguments":{"name":"widget","file":"overload.rs","line":5}}}"#,
             &conn,
+            None,
         )
         .unwrap();
         let parsed: Value = serde_json::from_str(&response).unwrap();
@@ -424,6 +505,7 @@ mod tests {
         let response = handle_line(
             r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_symbol","arguments":{"name":"b","line":1}}}"#,
             &conn,
+            None,
         )
         .unwrap();
         let parsed: Value = serde_json::from_str(&response).unwrap();
@@ -436,6 +518,7 @@ mod tests {
         let response = handle_line(
             r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"find","arguments":{"query":"a"}}}"#,
             &conn,
+            None,
         )
         .unwrap();
         let parsed: Value = serde_json::from_str(&response).unwrap();
@@ -470,6 +553,7 @@ mod tests {
         let response = handle_line(
             r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"find","arguments":{"query":"widget"}}}"#,
             &conn,
+            None,
         )
         .unwrap();
         let parsed: Value = serde_json::from_str(&response).unwrap();
@@ -502,6 +586,7 @@ mod tests {
         let response = handle_line(
             r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"find","arguments":{"query":"widget","limit":2}}}"#,
             &conn,
+            None,
         )
         .unwrap();
         let parsed: Value = serde_json::from_str(&response).unwrap();
@@ -519,6 +604,7 @@ mod tests {
         let response = handle_line(
             r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"find","arguments":{"query":"a","token_budget":1}}}"#,
             &conn,
+            None,
         )
         .unwrap();
         let parsed: Value = serde_json::from_str(&response).unwrap();
@@ -540,6 +626,7 @@ mod tests {
         let response = handle_line(
             r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"find","arguments":{"query":"ghost"}}}"#,
             &conn,
+            None,
         )
         .unwrap();
         let parsed: Value = serde_json::from_str(&response).unwrap();
@@ -555,6 +642,7 @@ mod tests {
         let response = handle_line(
             r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"find","arguments":{}}}"#,
             &conn,
+            None,
         )
         .unwrap();
         let parsed: Value = serde_json::from_str(&response).unwrap();
@@ -567,6 +655,7 @@ mod tests {
         let response = handle_line(
             r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"find","arguments":{"query":"a","limit":500}}}"#,
             &conn,
+            None,
         )
         .unwrap();
         let parsed: Value = serde_json::from_str(&response).unwrap();
@@ -579,6 +668,7 @@ mod tests {
         let response = handle_line(
             r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"find","arguments":{"query":"a","limit":0}}}"#,
             &conn,
+            None,
         )
         .unwrap();
         let parsed: Value = serde_json::from_str(&response).unwrap();
@@ -596,6 +686,7 @@ mod tests {
         let find_response = handle_line(
             r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"find","arguments":{"query":"widget"}}}"#,
             &conn,
+            None,
         )
         .unwrap();
         let find_parsed: Value = serde_json::from_str(&find_response).unwrap();
@@ -618,7 +709,8 @@ mod tests {
                 "arguments": { "name": "widget", "file": file, "line": line }
             }
         });
-        let get_symbol_response = handle_line(&get_symbol_request.to_string(), &conn).unwrap();
+        let get_symbol_response =
+            handle_line(&get_symbol_request.to_string(), &conn, None).unwrap();
         let get_symbol_parsed: Value = serde_json::from_str(&get_symbol_response).unwrap();
         let get_symbol_text = get_symbol_parsed["result"]["content"][0]["text"]
             .as_str()
@@ -629,9 +721,57 @@ mod tests {
     }
 
     #[test]
+    fn audit_log_records_get_symbol_and_impact_targets_but_not_find() {
+        let conn = indexed_conn();
+        let dir = tempdir().unwrap();
+        let audit_log_path = dir.path().join("audit.jsonl");
+
+        handle_line(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_symbol","arguments":{"name":"b"}}}"#,
+            &conn,
+            Some(&audit_log_path),
+        );
+        handle_line(
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"impact","arguments":{"name":"b"}}}"#,
+            &conn,
+            Some(&audit_log_path),
+        );
+        handle_line(
+            r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"find","arguments":{"query":"a"}}}"#,
+            &conn,
+            Some(&audit_log_path),
+        );
+
+        let events = corbel_core::audit::read_events(&audit_log_path).unwrap();
+        assert_eq!(events.len(), 2);
+        assert!(
+            events
+                .iter()
+                .any(|e| e.tool == "get_symbol" && e.name == "b")
+        );
+        assert!(events.iter().any(|e| e.tool == "impact" && e.name == "b"));
+        assert!(events.iter().all(|e| e.tool != "find"));
+    }
+
+    #[test]
+    fn no_audit_log_path_writes_nothing() {
+        let conn = indexed_conn();
+        let dir = tempdir().unwrap();
+        let audit_log_path = dir.path().join("audit.jsonl");
+
+        handle_line(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_symbol","arguments":{"name":"b"}}}"#,
+            &conn,
+            None,
+        );
+
+        assert!(!audit_log_path.exists());
+    }
+
+    #[test]
     fn malformed_json_returns_parse_error() {
         let conn = empty_conn();
-        let response = handle_line("not json", &conn).unwrap();
+        let response = handle_line("not json", &conn, None).unwrap();
         let parsed: Value = serde_json::from_str(&response).unwrap();
         assert_eq!(parsed["error"]["code"], -32700);
     }
@@ -642,7 +782,8 @@ mod tests {
         assert!(
             handle_line(
                 r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
-                &conn
+                &conn,
+                None
             )
             .is_none()
         );
@@ -652,7 +793,12 @@ mod tests {
     fn unknown_notification_produces_no_response() {
         let conn = empty_conn();
         assert!(
-            handle_line(r#"{"jsonrpc":"2.0","method":"notifications/ghost"}"#, &conn).is_none()
+            handle_line(
+                r#"{"jsonrpc":"2.0","method":"notifications/ghost"}"#,
+                &conn,
+                None
+            )
+            .is_none()
         );
     }
 }
