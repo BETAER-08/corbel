@@ -72,9 +72,11 @@ pub fn resolve_all(conn: &Connection) -> Result<ResolutionStats> {
     };
 
     let mut stats = ResolutionStats::default();
+    let mut processed: usize = 0;
     let tx = conn.unchecked_transaction()?;
 
     for (relationship_id, caller_symbol_id, callee_name) in relationships {
+        processed += 1;
         let Some(&caller_file_id) = symbol_file.get(&caller_symbol_id) else {
             tx.execute(
                 "UPDATE relationships SET callee_file_id = NULL, resolution = 'unresolved' WHERE id = ?1",
@@ -138,6 +140,8 @@ pub fn resolve_all(conn: &Connection) -> Result<ResolutionStats> {
     }
 
     tx.commit()?;
+
+    tracing::debug!(processed, "resolve_all processed relationships");
 
     Ok(stats)
 }
