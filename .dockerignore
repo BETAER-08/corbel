@@ -1,0 +1,23 @@
+# Build context for the release image. Only the crate sources and workspace
+# manifests are needed; everything else here is either huge (perf-repos is
+# 2.3GB), a local build artifact, or irrelevant to compiling/indexing corbel.
+target/
+.corbel/
+.database/
+.fastembed_cache/
+
+benchmarks/repos/
+benchmarks/perf-repos/
+benchmarks/results/
+
+.git/
+.github/
+.idea/
+.vscode/
+.claude/
+
+*.dockerignore
+Dockerfile*
+
+__pycache__/
+.DS_Store
