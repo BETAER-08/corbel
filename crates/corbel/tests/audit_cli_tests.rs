@@ -125,3 +125,107 @@ fn unindexed_new_file_is_reported_separately_from_stale_index() {
         .stdout(predicate::str::contains("new.rs"))
         .stdout(predicate::str::contains("out of sync").not());
 }
+
+/// Regression test for report-quality synthetic testing: a symbol with more
+/// uninspected callers than the display cap must summarize the remainder as
+/// a count instead of printing every single one — a heavily-called symbol
+/// changed elsewhere must not be able to push every other symbol's verdict
+/// off the reader's screen.
+#[test]
+fn uninspected_list_beyond_the_cap_is_summarized_not_printed_in_full() {
+    let repo_dir = tempdir().unwrap();
+    let src = b"pub fn target() {}\n\
+pub fn caller1() { target(); }\n\
+pub fn caller2() { target(); }\n\
+pub fn caller3() { target(); }\n\
+pub fn caller4() { target(); }\n\
+pub fn caller5() { target(); }\n\
+pub fn caller6() { target(); }\n";
+    init_repo_with_commit(repo_dir.path(), "lib.rs", src);
+
+    corbel_cmd()
+        .arg("index")
+        .arg(repo_dir.path())
+        .assert()
+        .success();
+
+    fs::write(
+        repo_dir.path().join(".corbel").join("audit.jsonl"),
+        b"{\"ts\":1,\"tool\":\"impact\",\"name\":\"target\",\"file\":\"lib.rs\",\"line\":1}\n"
+            as &[u8],
+    )
+    .unwrap();
+
+    // Edit only target()'s body; its 6 callers are untouched but all remain
+    // uninspected (no get_symbol record for any of them).
+    let edited = b"pub fn target() {\n    let _x = 1;\n}\n\
+pub fn caller1() { target(); }\n\
+pub fn caller2() { target(); }\n\
+pub fn caller3() { target(); }\n\
+pub fn caller4() { target(); }\n\
+pub fn caller5() { target(); }\n\
+pub fn caller6() { target(); }\n";
+    fs::write(repo_dir.path().join("lib.rs"), edited).unwrap();
+
+    corbel_cmd()
+        .arg("audit")
+        .arg(repo_dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("0/6 affected symbols"))
+        .stdout(predicate::str::contains("caller1 (lib.rs"))
+        .stdout(predicate::str::contains("caller5 (lib.rs"))
+        .stdout(predicate::str::contains("caller6 (lib.rs").not())
+        .stdout(predicate::str::contains("... (5 shown, 1 more)"));
+}
+
+/// Regression test for report-quality synthetic testing: events excluded by
+/// `--since` must be visibly distinguished from a symbol that was genuinely
+/// never checked. Before this fix, both cases rendered as the identical
+/// "impact() never called" line, so a user could not tell "the agent didn't
+/// check this" from "the agent checked this, but outside the time window I
+/// happened to pick" — a false alarm baked into the report format itself.
+#[test]
+fn since_filter_distinguishes_excluded_events_from_genuine_non_use() {
+    let repo_dir = tempdir().unwrap();
+    let src = b"pub fn foo() {}\npub fn bar() {}\n";
+    init_repo_with_commit(repo_dir.path(), "lib.rs", src);
+
+    corbel_cmd()
+        .arg("index")
+        .arg(repo_dir.path())
+        .assert()
+        .success();
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let two_hours_ago = now - 7200;
+    let ten_minutes_ago = now - 600;
+
+    fs::write(
+        repo_dir.path().join(".corbel").join("audit.jsonl"),
+        format!(
+            "{{\"ts\":{two_hours_ago},\"tool\":\"impact\",\"name\":\"foo\",\"file\":\"lib.rs\",\"line\":1}}\n\
+             {{\"ts\":{ten_minutes_ago},\"tool\":\"impact\",\"name\":\"bar\",\"file\":\"lib.rs\",\"line\":2}}\n"
+        ),
+    )
+    .unwrap();
+
+    let edited = b"pub fn foo() { let _x = 1; }\npub fn bar() { let _y = 1; }\n";
+    fs::write(repo_dir.path().join("lib.rs"), edited).unwrap();
+
+    corbel_cmd()
+        .arg("audit")
+        .arg(repo_dir.path())
+        .arg("--since")
+        .arg("1h")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1 excluded by --since window"))
+        .stdout(predicate::str::contains(
+            "impact() not called within this window.",
+        ))
+        .stdout(predicate::str::contains("bar (lib.rs:2)"));
+}

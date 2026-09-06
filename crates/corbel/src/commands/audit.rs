@@ -39,10 +39,13 @@ pub fn run(path: &Path, since: Option<&str>) -> anyhow::Result<()> {
     }
 
     let mut events = outcome.events;
+    let mut excluded_by_since = 0usize;
     if let Some(since) = since {
         let cutoff =
             parse_since(since).with_context(|| format!("invalid --since value \"{since}\""))?;
+        let before = events.len();
         events.retain(|event| event.ts >= cutoff);
+        excluded_by_since = before - events.len();
     }
 
     let mut changed_ranges = git_diff_line_ranges(root.as_path())?;
@@ -119,10 +122,19 @@ pub fn run(path: &Path, since: Option<&str>) -> anyhow::Result<()> {
     changed_symbols.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
 
     if events.is_empty() {
-        println!(
-            "No corbel queries recorded in this window.\n\
-             The agent did not use corbel for these changes — coverage cannot be assessed.\n"
-        );
+        if excluded_by_since > 0 {
+            println!(
+                "No corbel queries recorded within this --since window, but {excluded_by_since} \
+                 were recorded outside it. Coverage cannot be assessed for this window — this \
+                 does not mean the agent never used corbel, only that it didn't within the \
+                 window checked. Try a larger --since value or omit it to see the full history.\n"
+            );
+        } else {
+            println!(
+                "No corbel queries recorded in this window.\n\
+                 The agent did not use corbel for these changes — coverage cannot be assessed.\n"
+            );
+        }
         println!("Changed symbols:");
         for symbol in &changed_symbols {
             println!("  {} ({}:{})", symbol.name, symbol.file, symbol.line);
@@ -154,17 +166,23 @@ pub fn run(path: &Path, since: Option<&str>) -> anyhow::Result<()> {
     }
 
     let unchecked = coverages.iter().filter(|c| !c.impact_checked).count();
+    let excluded_note = if excluded_by_since > 0 {
+        format!(" ({excluded_by_since} excluded by --since window)")
+    } else {
+        String::new()
+    };
     println!(
-        "{} quer{} recorded, {} symbol{} changed, {} unchecked\n",
+        "{} quer{} recorded{}, {} symbol{} changed, {} unchecked\n",
         events.len(),
         if events.len() == 1 { "y" } else { "ies" },
+        excluded_note,
         changed_symbols.len(),
         if changed_symbols.len() == 1 { "" } else { "s" },
         unchecked
     );
 
     for coverage in &coverages {
-        print_coverage(coverage);
+        print_coverage(coverage, since.is_some());
     }
 
     Ok(())
@@ -241,11 +259,30 @@ fn head_blob_hash(root: &Path, file: &str) -> anyhow::Result<Option<String>> {
     Ok(Some(hash_bytes(&output.stdout).to_string()))
 }
 
-fn print_coverage(coverage: &SymbolCoverage) {
+/// Cap on how many uninspected-symbol lines `print_coverage` prints before
+/// summarizing the rest as a count. Without a cap, a single heavily-called
+/// symbol's "not inspected" list can run to dozens or hundreds of lines
+/// (observed: 86, for a symbol with 91 callers, in this repo's own code) and
+/// bury every other symbol's one-line verdict below it — the report becomes
+/// unreadable exactly when it matters most (a large or heavily-used change).
+/// 5 is enough to show the reader concrete, actionable names (not just a
+/// count) without letting one symbol's fan-out dominate a multi-symbol
+/// report; it matches the number of items a git-style summary typically
+/// shows before collapsing into "N more". There's no `--full` escape hatch:
+/// the full list is always one `impact()` call away for whoever needs it,
+/// and adding a flag here would let the common path regress back to
+/// unbounded output by habit.
+const UNINSPECTED_DISPLAY_LIMIT: usize = 5;
+
+fn print_coverage(coverage: &SymbolCoverage, since_active: bool) {
     println!("{} ({}:{})", coverage.name, coverage.file, coverage.line);
 
     if !coverage.impact_checked {
-        println!("  impact() never called on this symbol — blast radius was never checked.");
+        if since_active {
+            println!("  impact() not called within this window.");
+        } else {
+            println!("  impact() never called on this symbol — blast radius was never checked.");
+        }
     } else if coverage.affected_total == 0 {
         println!("  impact() called — no callers found, nothing to inspect.");
     } else {
@@ -256,8 +293,13 @@ fn print_coverage(coverage: &SymbolCoverage) {
         );
         if !coverage.uninspected.is_empty() {
             println!("  not inspected:");
-            for (name, file, line) in &coverage.uninspected {
+            for (name, file, line) in coverage.uninspected.iter().take(UNINSPECTED_DISPLAY_LIMIT) {
                 println!("    - {name} ({file}:{line})");
+            }
+            let shown = UNINSPECTED_DISPLAY_LIMIT.min(coverage.uninspected.len());
+            let remaining = coverage.uninspected.len() - shown;
+            if remaining > 0 {
+                println!("    ... ({shown} shown, {remaining} more)");
             }
         }
     }
