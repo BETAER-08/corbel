@@ -21,5 +21,15 @@ pub enum Command {
     Serve {
         #[arg(default_value = ".")]
         path: PathBuf,
+
+        #[arg(long)]
+        audit: bool,
+    },
+    Audit {
+        #[arg(default_value = ".")]
+        path: PathBuf,
+
+        #[arg(long)]
+        since: Option<String>,
     },
 }

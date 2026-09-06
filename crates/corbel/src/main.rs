@@ -12,7 +12,8 @@ fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Command::Index { path } => commands::index::run(&path, cli.verbose),
-        Command::Serve { path } => commands::serve::run(&path),
+        Command::Serve { path, audit } => commands::serve::run(&path, audit),
+        Command::Audit { path, since } => commands::audit::run(&path, since.as_deref()),
     }
 }
 

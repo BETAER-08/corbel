@@ -8,7 +8,7 @@ use corbel_core::store::migrate::open_for_serve;
 
 use crate::mcp::server::McpServer;
 
-pub fn run(path: &Path) -> anyhow::Result<()> {
+pub fn run(path: &Path, audit: bool) -> anyhow::Result<()> {
     let root = RepoRoot::new(path)
         .with_context(|| format!("failed to open repository root at {}", path.display()))?;
 
@@ -51,7 +51,8 @@ pub fn run(path: &Path) -> anyhow::Result<()> {
         }
     };
 
-    let server = McpServer::new(conn);
+    let audit_log_path = audit.then(|| root.as_path().join(".corbel").join("audit.jsonl"));
+    let server = McpServer::new(conn, audit_log_path);
 
     let stdin = io::stdin();
     let mut input = stdin.lock();
