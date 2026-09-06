@@ -271,6 +271,14 @@ Pass `file` (and `line`, if the file still has more than one match) — exactly 
 - Five `chevrotain` entries (`findEndOfInputAnchor` and four siblings) appear to have an incorrect golden-set answer: their real sole caller is `validateRegExpPattern`, but the golden set records `validatePatterns` (one level further out).
   All four tools agree on `validateRegExpPattern` and are uniformly scored wrong against it. **This was not corrected in the golden set** — the entries stand as originally verified, flagged here instead, so a scoring artifact doesn't get fixed quietly after the fact.
 
+**`audit`'s known limitations:**
+
+`audit` maps `git diff HEAD` line ranges to symbol definitions using line numbers from the *last* `corbel index` run, not the current file content. If a file was edited after that index run, the line numbers in the index and the line numbers in the diff refer to two different versions of the file, and a hunk can be attributed to the wrong symbol entirely (e.g. inserting a line above every symbol shifts a diff hunk onto whatever symbol used to sit at that line). `audit` detects this by comparing the indexed content hash against the file's current hash; if they differ, it warns and excludes that file from coverage analysis rather than reporting a mapping it can't stand behind. Re-run `corbel index` before `corbel audit` whenever files changed after the last index — in practice, for any edit-then-audit workflow, that means indexing again right before auditing, not just once at the start of a session.
+
+`audit`'s query log (`.corbel/audit.jsonl`) is a plain JSON-Lines file; a line that fails to parse (partial write, disk corruption) is indistinguishable from a query that never happened unless it's counted separately. `audit` counts and reports unparseable lines rather than silently dropping them, so a corrupted log reads as "N lines corrupted," not as a lower, wrong query count.
+
+`audit` approximates a symbol's body as running from its own definition line up to (but not including) the next symbol's definition line, sorted by line — the schema doesn't record where a symbol's body actually ends. This breaks down for the *last* symbol in a file: with no following symbol to bound it, its approximated body extends to end-of-file, so appending a brand-new top-level symbol after it is reported as a change to the last *existing* symbol instead of being recognized as a new one. A precise fix requires the indexer to record each symbol's end line, which it does not today; this is a known, accepted source of false positives for changes made at the very end of a file, not a bug to be silently worked around.
+
 ## License and boundaries
 
 corbel is licensed under [MIT](LICENSE).

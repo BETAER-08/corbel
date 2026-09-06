@@ -53,23 +53,45 @@ pub fn append_event(log_path: &Path, event: &AuditEvent) -> Result<()> {
 }
 
 pub fn read_events(log_path: &Path) -> Result<Vec<AuditEvent>> {
+    Ok(read_events_checked(log_path)?.events)
+}
+
+/// Result of reading the audit log, including a count of lines that failed
+/// to parse. A silently-dropped malformed line looks identical to "the tool
+/// was never called" to every downstream consumer — the query count drops
+/// and unchecked-symbol counts rise for a reason that has nothing to do with
+/// agent behavior. Callers that report coverage to a human must surface
+/// `corrupted_lines` rather than discard it, the same way indexing surfaces
+/// skipped files instead of silently shrinking the symbol count.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ReadEventsOutcome {
+    pub events: Vec<AuditEvent>,
+    pub corrupted_lines: usize,
+}
+
+pub fn read_events_checked(log_path: &Path) -> Result<ReadEventsOutcome> {
     if !log_path.exists() {
-        return Ok(Vec::new());
+        return Ok(ReadEventsOutcome::default());
     }
     let file = fs::File::open(log_path).map_err(|e| Error::io(log_path, e))?;
     let reader = BufReader::new(file);
     let mut events = Vec::new();
+    let mut corrupted_lines = 0usize;
     for line in reader.lines() {
         let line = line.map_err(|e| Error::io(log_path, e))?;
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
-        if let Ok(event) = serde_json::from_str::<AuditEvent>(trimmed) {
-            events.push(event);
+        match serde_json::from_str::<AuditEvent>(trimmed) {
+            Ok(event) => events.push(event),
+            Err(_) => corrupted_lines += 1,
         }
     }
-    Ok(events)
+    Ok(ReadEventsOutcome {
+        events,
+        corrupted_lines,
+    })
 }
 
 fn was_queried(events: &[AuditEvent], tool: &str, name: &str, file: &str) -> bool {
@@ -152,6 +174,33 @@ mod tests {
         let dir = tempdir().unwrap();
         let log_path = dir.path().join("audit.jsonl");
         assert_eq!(read_events(&log_path).unwrap(), Vec::new());
+    }
+
+    #[test]
+    fn read_events_checked_counts_corrupted_lines_instead_of_dropping_them() {
+        let dir = tempdir().unwrap();
+        let log_path = dir.path().join("audit.jsonl");
+        let event = AuditEvent::now("get_symbol", "widget", "src/lib.rs", 10);
+        append_event(&log_path, &event).unwrap();
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&log_path)
+            .unwrap()
+            .write_all(b"{not valid json\n\n")
+            .unwrap();
+
+        let outcome = read_events_checked(&log_path).unwrap();
+        assert_eq!(outcome.events, vec![event]);
+        assert_eq!(outcome.corrupted_lines, 1);
+    }
+
+    #[test]
+    fn read_events_checked_of_missing_file_reports_no_corruption() {
+        let dir = tempdir().unwrap();
+        let log_path = dir.path().join("audit.jsonl");
+        let outcome = read_events_checked(&log_path).unwrap();
+        assert_eq!(outcome.events, Vec::new());
+        assert_eq!(outcome.corrupted_lines, 0);
     }
 
     #[test]
