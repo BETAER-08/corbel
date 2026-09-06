@@ -218,17 +218,19 @@ pub fn symbols_in_file(conn: &Connection, file: &str) -> Result<Vec<SymbolInfo>>
          WHERE files.path = ?1
          ORDER BY symbols.line",
     )?;
-    let rows = stmt.query_map(params![file], |row| {
-        Ok(SymbolInfo {
-            name: row.get(0)?,
-            kind: row.get(1)?,
-            line: row.get(2)?,
-            signature: row.get(3)?,
-            is_public: row.get(4)?,
-            file: row.get(5)?,
-        })
-    })?;
+    let rows = stmt.query_map(params![file], map_symbol_info_row)?;
     rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
+}
+
+fn map_symbol_info_row(row: &rusqlite::Row) -> rusqlite::Result<SymbolInfo> {
+    Ok(SymbolInfo {
+        name: row.get(0)?,
+        kind: row.get(1)?,
+        line: row.get(2)?,
+        signature: row.get(3)?,
+        is_public: row.get(4)?,
+        file: row.get(5)?,
+    })
 }
 
 pub fn get_symbol(
