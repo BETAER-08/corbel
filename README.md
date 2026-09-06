@@ -72,6 +72,22 @@ powershell -ExecutionPolicy ByPass -c "irm https://github.com/BETAER-08/corbel/r
 3. Ask a refactoring question in plain language — the agent calls `get_symbol`/`impact`/`find` on its own:
    > "If I change `resolve_all`, what else needs to change?"
 
+A prompt that lets the agent actually use these tools beats one that doesn't:
+
+```
+# Good — invites the agent to check impact before touching anything
+"Check the impact of resolve_all, look at its callers with get_symbol,
+ then update the function."
+
+# Bad — skips straight to an edit with no verification
+"Add a comment to the symbols_in_file function in query.rs."
+```
+
+The bad prompt still works, but the agent has no reason to call `impact` or
+`get_symbol` first — it's a one-line, no-risk edit. Ask for the change in a
+way that surfaces the blast radius (callers, callees, cross-file effects)
+when it actually matters, and the agent will reach for the tools on its own.
+
 For other MCP clients, add corbel directly to the server config:
 
 ```json
