@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::fs;
 use std::path::Path;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -53,11 +52,35 @@ pub fn run(path: &Path, since: Option<&str>) -> anyhow::Result<()> {
     }
 
     let changed_files: Vec<String> = changed_ranges.keys().cloned().collect();
-    let stale = stale_indexed_files(&conn, root.as_path(), changed_files)?;
+    let mut stale = Vec::new();
+    let mut not_indexed = Vec::new();
+    for file in &changed_files {
+        match classify_file_freshness(&conn, root.as_path(), file)? {
+            FileFreshness::Fresh => {}
+            FileFreshness::Stale => stale.push(file.clone()),
+            FileFreshness::NotIndexed => not_indexed.push(file.clone()),
+        }
+    }
+
+    if !not_indexed.is_empty() {
+        println!(
+            "Note: {} file{} changed but not yet indexed — nothing to check coverage against:",
+            not_indexed.len(),
+            if not_indexed.len() == 1 { "" } else { "s" }
+        );
+        for file in &not_indexed {
+            println!("  - {file}");
+        }
+        println!();
+        for file in &not_indexed {
+            changed_ranges.remove(file);
+        }
+    }
+
     if !stale.is_empty() {
         println!(
-            "Warning: the corbel index is stale for {} file{} — on-disk content no \
-             longer matches what was indexed:",
+            "Warning: the corbel index is out of sync with HEAD for {} file{} — its indexed \
+             content matches neither HEAD nor a state audit can verify against the current diff:",
             stale.len(),
             if stale.len() == 1 { "" } else { "s" }
         );
@@ -65,10 +88,10 @@ pub fn run(path: &Path, since: Option<&str>) -> anyhow::Result<()> {
             println!("  - {file}");
         }
         println!(
-            "Diff line numbers can't be trusted against a stale index — attributing a \
-             hunk to a symbol would risk being silently wrong, not just imprecise. \
-             Run `corbel index` and re-run audit. Skipping coverage analysis for \
-             these file(s).\n"
+            "`corbel audit` maps diff line numbers to indexed symbols using HEAD as the common \
+             coordinate system; that only works when the index was built while the working tree \
+             matched HEAD. Re-run `corbel index` right after a commit (before making new edits), \
+             then re-run audit. Skipping coverage analysis for these file(s).\n"
         );
         for file in &stale {
             changed_ranges.remove(file);
@@ -76,7 +99,7 @@ pub fn run(path: &Path, since: Option<&str>) -> anyhow::Result<()> {
     }
 
     if changed_ranges.is_empty() {
-        println!("No remaining changes to analyze after excluding files with a stale index.");
+        println!("No remaining changes to analyze after excluding the file(s) above.");
         return Ok(());
     }
 
@@ -147,39 +170,75 @@ pub fn run(path: &Path, since: Option<&str>) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Returns the subset of `files` whose on-disk content no longer matches
-/// what's recorded in `files.hash`. `symbols_in_file` returns line numbers
-/// from the last `corbel index` run; if the file changed since then (even by
-/// adding a single line above everything else), every hunk computed against
-/// the *current* working tree lines up with the *old* symbol positions,
-/// mapping changes to the wrong symbol without any error. A file with no
-/// indexed row is not stale — there's nothing to compare it against, and
-/// `symbols_in_file` will return no symbols for it regardless.
-fn stale_indexed_files(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FileFreshness {
+    /// The indexed content hash matches the HEAD blob hash: the index was
+    /// built from exactly the state `git diff HEAD`'s old side describes, so
+    /// old-side hunk coordinates line up with indexed symbol lines.
+    Fresh,
+    /// The file has an indexed row, but its hash matches neither a
+    /// retrievable HEAD blob nor (by construction, since it got here) the
+    /// only other candidate would be re-deriving it from the working tree —
+    /// which is exactly the coordinate system `audit` cannot safely use.
+    /// Either the index was built from some third state (e.g. mid-edit,
+    /// before those edits were committed), or the file doesn't exist at
+    /// HEAD at all despite having an indexed row (added to the index but
+    /// never committed). No coordinate system can be trusted here.
+    Stale,
+    /// No indexed row for this file at all — never indexed, or indexed then
+    /// deleted from the index. There's nothing to compare against, and
+    /// `symbols_in_file` will return no symbols for it regardless, so this
+    /// is reported separately from `Stale` rather than as a coordinate risk.
+    NotIndexed,
+}
+
+/// Classifies a changed file's indexing freshness against HEAD rather than
+/// against the current working tree. `git diff HEAD`'s hunks are always
+/// expressed relative to HEAD on one side (the "old" side) and the working
+/// tree on the other (the "new" side); `audit` matches hunks to indexed
+/// symbols using the *old* side, so what must line up with the index is
+/// HEAD, not whatever is currently on disk. Comparing against the working
+/// tree instead would flag every file with an uncommitted edit as stale
+/// unconditionally, since editing a file necessarily changes its hash —
+/// defeating the entire point of auditing uncommitted changes.
+fn classify_file_freshness(
     conn: &rusqlite::Connection,
     root: &Path,
-    files: Vec<String>,
-) -> anyhow::Result<Vec<String>> {
-    let mut stale = Vec::new();
-    for file in files {
-        let indexed_hash: Option<String> = conn
-            .query_row(
-                "SELECT hash FROM files WHERE path = ?1",
-                [file.as_str()],
-                |row| row.get(0),
-            )
-            .optional()?;
-        let Some(indexed_hash) = indexed_hash else {
-            continue;
-        };
-        let Ok(bytes) = fs::read(root.join(&file)) else {
-            continue;
-        };
-        if hash_bytes(&bytes).to_string() != indexed_hash {
-            stale.push(file);
-        }
+    file: &str,
+) -> anyhow::Result<FileFreshness> {
+    let indexed_hash: Option<String> = conn
+        .query_row("SELECT hash FROM files WHERE path = ?1", [file], |row| {
+            row.get(0)
+        })
+        .optional()?;
+
+    let Some(indexed_hash) = indexed_hash else {
+        return Ok(FileFreshness::NotIndexed);
+    };
+
+    match head_blob_hash(root, file)? {
+        Some(head_hash) if head_hash == indexed_hash => Ok(FileFreshness::Fresh),
+        _ => Ok(FileFreshness::Stale),
     }
-    Ok(stale)
+}
+
+/// Returns the content hash of `file` as it exists at `HEAD`, or `None` if
+/// `git show HEAD:<file>` fails — most commonly because the file doesn't
+/// exist at HEAD (it's new and, at most, staged). Hashed with the same
+/// `hash_bytes` function and raw-byte input the indexer uses, so the result
+/// is directly comparable to `files.hash`.
+fn head_blob_hash(root: &Path, file: &str) -> anyhow::Result<Option<String>> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["show", &format!("HEAD:{file}")])
+        .output()
+        .context("failed to run `git show` — is git installed and is this a git repository?")?;
+
+    if !output.status.success() {
+        return Ok(None);
+    }
+    Ok(Some(hash_bytes(&output.stdout).to_string()))
 }
 
 fn print_coverage(coverage: &SymbolCoverage) {
@@ -250,6 +309,15 @@ fn git_diff_line_ranges(root: &Path) -> anyhow::Result<HashMap<String, Vec<(u32,
     for line in text.lines() {
         if let Some(path) = line.strip_prefix("+++ ") {
             current_file = parse_diff_path(path);
+            // Register the file even if every hunk below turns out to
+            // contribute no old-side range (e.g. a brand-new file, where
+            // every hunk's old side is empty — see `parse_hunk_old_range`).
+            // Without this, such files never appear as a key here at all,
+            // making them invisible to the freshness check below instead of
+            // being classified and reported as `NotIndexed`/`Stale`.
+            if let Some(file) = &current_file {
+                ranges.entry(file.clone()).or_default();
+            }
             continue;
         }
         if line.starts_with("--- ") {
@@ -259,12 +327,24 @@ fn git_diff_line_ranges(root: &Path) -> anyhow::Result<HashMap<String, Vec<(u32,
             let Some(file) = current_file.as_ref() else {
                 continue;
             };
-            if let Some((start, count)) = parse_hunk_new_range(hunk) {
+            if let Some((start, count)) = parse_hunk_old_range(hunk) {
                 if count > 0 {
                     ranges
                         .entry(file.clone())
                         .or_default()
                         .push((start, start + count - 1));
+                } else if start > 0 {
+                    // Pure addition (nothing removed on the old side): `start`
+                    // is the old-file line after which new content was
+                    // inserted, per unified-diff convention. Treat it as a
+                    // single-point range so it's attributed to whichever
+                    // symbol's approximated body contains that line — i.e.
+                    // an insertion inside an existing symbol's body is
+                    // attributed to that symbol. `start == 0` means the
+                    // insertion happened before the first line of the file
+                    // (or the file is new), which cannot be inside any
+                    // symbol's body, so it's intentionally not recorded.
+                    ranges.entry(file.clone()).or_default().push((start, start));
                 }
             }
         }
@@ -281,9 +361,16 @@ fn parse_diff_path(raw: &str) -> Option<String> {
     raw.strip_prefix("b/").map(str::to_string)
 }
 
-fn parse_hunk_new_range(hunk: &str) -> Option<(u32, u32)> {
-    let plus_part = hunk.split(" +").nth(1)?;
-    let range_part = plus_part.split(" @@").next()?;
+/// Parses the old-file (`-`) side of a hunk header, e.g. `-3,4 +5,6 @@` ->
+/// `(3, 4)`, or `-3 +5 @@` -> `(3, 1)` (an omitted count means 1). `audit`
+/// matches hunks against indexed symbols using this side rather than the
+/// new-file (`+`) side: indexed symbol lines come from the last `corbel
+/// index` run, which — when `FileFreshness::Fresh` — reflects HEAD, the same
+/// version `git diff`'s old side describes. Using the new side here would
+/// compare post-edit line numbers against pre-edit symbol positions.
+fn parse_hunk_old_range(hunk: &str) -> Option<(u32, u32)> {
+    let minus_part = hunk.strip_prefix('-')?;
+    let range_part = minus_part.split(' ').next()?;
     let mut pieces = range_part.splitn(2, ',');
     let start: u32 = pieces.next()?.trim().parse().ok()?;
     let count: u32 = match pieces.next() {
@@ -334,6 +421,26 @@ fn symbols_touched_by_ranges(symbols: &[SymbolInfo], ranges: &[(u32, u32)]) -> V
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+
+    fn git(root: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(args)
+            .status()
+            .expect("git command runs");
+        assert!(status.success(), "git {args:?} failed");
+    }
+
+    fn init_repo_with_commit(root: &Path, file: &str, content: &[u8]) {
+        git(root, &["init", "-q"]);
+        git(root, &["config", "user.email", "test@example.com"]);
+        git(root, &["config", "user.name", "Test"]);
+        fs::write(root.join(file), content).unwrap();
+        git(root, &["add", file]);
+        git(root, &["commit", "-q", "-m", "init"]);
+    }
 
     #[test]
     fn parse_since_accepts_raw_unix_timestamp() {
@@ -346,9 +453,14 @@ mod tests {
     }
 
     #[test]
-    fn parse_hunk_new_range_reads_start_and_count() {
-        assert_eq!(parse_hunk_new_range("-1,2 +3,4 @@"), Some((3, 4)));
-        assert_eq!(parse_hunk_new_range("-1 +5 @@"), Some((5, 1)));
+    fn parse_hunk_old_range_reads_start_and_count() {
+        assert_eq!(parse_hunk_old_range("-1,2 +3,4 @@"), Some((1, 2)));
+        assert_eq!(parse_hunk_old_range("-1 +5 @@"), Some((1, 1)));
+    }
+
+    #[test]
+    fn parse_hunk_old_range_reads_pure_addition_as_zero_count() {
+        assert_eq!(parse_hunk_old_range("-5,0 +6,3 @@"), Some((5, 0)));
     }
 
     #[test]
@@ -393,42 +505,75 @@ mod tests {
     }
 
     #[test]
-    fn stale_indexed_files_flags_hash_mismatch_and_skips_unindexed_or_missing() {
-        use corbel_core::store::schema::create_schema;
+    fn freshness_is_fresh_when_indexed_hash_matches_head_blob() {
+        let dir = tempfile::tempdir().unwrap();
+        init_repo_with_commit(dir.path(), "a.rs", b"fn a() {}\n");
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        create_schema(&conn).unwrap();
-
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("a.rs"), b"fn a() {}\n").unwrap();
-        fs::write(dir.path().join("b.rs"), b"fn b() {}\n").unwrap();
-
-        let stale_hash = hash_bytes(b"content from an old index run").to_string();
+        corbel_core::store::schema::create_schema(&conn).unwrap();
+        let head_hash = hash_bytes(b"fn a() {}\n").to_string();
         conn.execute(
             "INSERT INTO files (path, lang, hash, indexed_at) VALUES ('a.rs', 'rs', ?1, 0)",
-            [stale_hash],
+            [head_hash],
         )
         .unwrap();
-        let fresh_hash = hash_bytes(&fs::read(dir.path().join("b.rs")).unwrap()).to_string();
+
+        // Edit the working tree without touching the index or HEAD.
+        fs::write(dir.path().join("a.rs"), b"fn a() { /* edited */ }\n").unwrap();
+
+        let freshness = classify_file_freshness(&conn, dir.path(), "a.rs").unwrap();
+        assert_eq!(freshness, FileFreshness::Fresh);
+    }
+
+    #[test]
+    fn freshness_is_stale_when_indexed_hash_matches_neither_head_nor_a_verifiable_state() {
+        let dir = tempfile::tempdir().unwrap();
+        init_repo_with_commit(dir.path(), "a.rs", b"fn a() {}\n");
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        corbel_core::store::schema::create_schema(&conn).unwrap();
+        // Indexed hash reflects neither HEAD nor any file on disk — e.g. the
+        // index was built mid-edit, before that edit was committed.
+        let mid_edit_hash = hash_bytes(b"fn a() { /* mid-edit state */ }\n").to_string();
         conn.execute(
-            "INSERT INTO files (path, lang, hash, indexed_at) VALUES ('b.rs', 'rs', ?1, 0)",
-            [fresh_hash],
-        )
-        .unwrap();
-        // "c.rs" is never indexed and "missing.rs" doesn't exist on disk.
-
-        let stale = stale_indexed_files(
-            &conn,
-            dir.path(),
-            vec![
-                "a.rs".to_string(),
-                "b.rs".to_string(),
-                "c.rs".to_string(),
-                "missing.rs".to_string(),
-            ],
+            "INSERT INTO files (path, lang, hash, indexed_at) VALUES ('a.rs', 'rs', ?1, 0)",
+            [mid_edit_hash],
         )
         .unwrap();
 
-        assert_eq!(stale, vec!["a.rs".to_string()]);
+        let freshness = classify_file_freshness(&conn, dir.path(), "a.rs").unwrap();
+        assert_eq!(freshness, FileFreshness::Stale);
+    }
+
+    #[test]
+    fn freshness_is_stale_when_indexed_but_absent_from_head() {
+        let dir = tempfile::tempdir().unwrap();
+        init_repo_with_commit(dir.path(), "committed.rs", b"fn c() {}\n");
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        corbel_core::store::schema::create_schema(&conn).unwrap();
+        // "new.rs" was indexed (e.g. via an uncommitted `corbel index` run)
+        // but was never committed, so it doesn't exist at HEAD.
+        let some_hash = hash_bytes(b"fn n() {}\n").to_string();
+        conn.execute(
+            "INSERT INTO files (path, lang, hash, indexed_at) VALUES ('new.rs', 'rs', ?1, 0)",
+            [some_hash],
+        )
+        .unwrap();
+
+        let freshness = classify_file_freshness(&conn, dir.path(), "new.rs").unwrap();
+        assert_eq!(freshness, FileFreshness::Stale);
+    }
+
+    #[test]
+    fn freshness_is_not_indexed_when_no_row_exists_regardless_of_git_state() {
+        let dir = tempfile::tempdir().unwrap();
+        init_repo_with_commit(dir.path(), "a.rs", b"fn a() {}\n");
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        corbel_core::store::schema::create_schema(&conn).unwrap();
+
+        let freshness = classify_file_freshness(&conn, dir.path(), "a.rs").unwrap();
+        assert_eq!(freshness, FileFreshness::NotIndexed);
     }
 }
