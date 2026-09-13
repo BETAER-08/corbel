@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-13
+
+### Added
+
+- `corbel audit`: compares the blast radius a changed symbol's callers
+  should have received against what was actually queried, to surface
+  "fixed without checking" gaps. Walks `git diff HEAD` to find changed
+  symbols, calls `impact` on each, and cross-references the result against
+  the query log to report which affected callers were never inspected via
+  `get_symbol`.
+- `corbel serve --audit`: opt-in (off by default) query logging to
+  `.corbel/audit.jsonl`. Each line records a timestamp, tool name, symbol
+  name, file path, and line number — never source code, and never leaves
+  the machine.
+
+### Changed
+
+- Added a `Dockerfile` and `.dockerignore` so Glama's evaluation pipeline
+  has a buildable image; it indexes corbel's own source at build time so
+  `corbel serve` has real symbols to answer against out of the box.
+- Added `glama.json` maintainer metadata.
+
 ### Documentation
 
 - Corrected `resolution` field docs (architecture.md, mcp-tools.md, tool
@@ -18,6 +40,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the definition. No resolution behavior changed — only the description of
   existing behavior. Agents relying on `scoped` to mean "found via the
   import" should stop; see docs/mcp-tools.md for the corrected semantics.
+- Reworked README structure and wording for readability; clarified the
+  limitations table.
+
+### Notes / Known limitations
+
+`audit`'s coordinate system, log format, and body-approximation limits are
+documented in full in README's [Known limitations](README.md#known-limitations)
+section — not repeated here. In short:
+
+- The index must have been built while the working tree matched HEAD;
+  `audit` verifies this per-file and excludes anything it can't trust
+  rather than guessing.
+- `find` calls are not counted toward coverage — only `impact` (checking
+  blast radius) and `get_symbol` (inspecting an affected caller) are.
+- Receiving `impact`'s `affected` list is not itself counted as having
+  inspected those symbols; each one needs its own `get_symbol` call to
+  count as checked.
+- Test functions are counted as callers like any other, so a symbol with
+  many test callers can show a low coverage percentage even when its only
+  production caller was inspected.
 
 ## [0.2.0] - 2026-09-04
 
