@@ -72,6 +72,7 @@ graph, walked across multiple hops.
 | -------------- | ------ | -------- | --------------------------------- |
 | `name`         | string | yes      | Symbol to analyze.                |
 | `file`         | string | no       | File to disambiguate the symbol.  |
+| `depth`        | number | no       | Cap on how many call-graph hops to walk outward (`0` = target only, `1` = direct callers, and so on). Defaults to corbel's internal maximum of 10, which is also the hard ceiling — values above 10 are clamped to 10. |
 | `token_budget` | number | no       | Cap on the size of the response, in estimated tokens. Defaults to corbel's built-in budget. |
 
 | Response field | Description                                                    |
@@ -90,8 +91,14 @@ Each entry in `results` is:
 | `affected`           | Every symbol reachable by walking callers outward from the target. Each entry has `name`, `file`, `line`, `resolution`, and `depth` (how many hops away it is). `name` follows the same owner-qualification rule as `get_symbol`'s `callers[].name` above: `Owner::name`/`Owner.name` for a method, bare for a free function. |
 | `affected_count`     | Number of entries in `affected`.                              |
 | `max_depth_reached`  | The largest `depth` value present in `affected`.               |
+| `depth_limit`        | The depth ceiling actually applied to this traversal (the requested `depth`, or 10 if omitted). |
+| `depth_truncated`    | Whether the traversal stopped expanding a node purely because it had reached `depth_limit`, and that node had further, unexplored callers beyond it. |
 | `truncated`          | Whether `affected` was cut to fit the token budget.            |
 | `truncated_count`    | How many further affected symbols were left out.               |
+
+`truncated` and `depth_truncated` are independent: a result can be cut short
+by the token budget, by the depth ceiling, by both, or by neither. Whichever
+limit is hit first stops the walk for that branch of the graph.
 
 ## find
 

@@ -1,5 +1,14 @@
 # corbel
 
+> **Project status: maintenance mode.**
+> corbel is feature-complete as of 1.0.0. The API is stable and the tool remains installable.
+>
+> **In scope:** dependency and toolchain changes that break the build; security advisories (`cargo audit`); clear malfunctions in existing functionality.
+>
+> **Out of scope:** new features, new language support, performance work, accuracy work.
+>
+> Best-effort only; no response time is promised. Feature request issues will be closed.
+
 corbel is a local **MCP server** that performs **static analysis** to build a resolved **call graph** of your codebase, so a coding agent can ask "what calls this?" and "what breaks if I change this?" without guessing.
 
 *A corbel (/ˈkɔːrbəl/) is the bracket built into a wall that carries the load above it — corbel maps what carries what in your code. (Unrelated to the Microsoft font of the same name.)*
@@ -191,6 +200,7 @@ grep and ripgrep's numbers above are **byte-identical** to a run taken before th
 
 - [before](benchmarks/results/benchmark-20260903T092406Z.md) — corbel F1 0.395 ([analysis](benchmarks/results/benchmark-20260903T092406Z-analysis.md))
 - [after](benchmarks/results/benchmark-20260903T142000Z.md) — corbel F1 0.707 ([analysis](benchmarks/results/benchmark-20260903T142000Z-analysis.md))
+- [1.0.0 re-run](benchmarks/results/benchmark-20260919T025532Z.md) — corbel F1 0.707, byte-identical TP/FP/FN to the run above ([analysis](benchmarks/results/benchmark-20260919T025532Z-analysis.md)): confirms the 1.0.0 index-schema and `impact`-depth changes moved no accuracy number in either direction.
 
 ```
 python3 benchmarks/harness/run_benchmark.py
@@ -212,7 +222,7 @@ Measured on real open-source repositories, not accuracy-scored. Full methodology
 - **`find` does two full-table scans per call** (`LIKE '%query%'` can't use the name index): negligible under ~32K symbols, 15-32ms typical past 110K.
 - **Call frequency matters more than symbol count for `find`**: a workflow issuing several `find` calls per task feels this before any single call does.
 - **Peak memory is flat regardless of repo size** (see table above) — time and tail latency are the scaling constraint, not memory.
-- **`impact` has no depth parameter**: it always walks to depth 10 or budget exhaustion, so depth-3-specific latency isn't measurable and isn't approximated here.
+- **`impact` accepts an optional `depth` parameter** (capped at its internal maximum of 10); omitting it preserves the pre-1.0 default of walking to depth 10 or budget exhaustion, so depth-3-specific latency isn't measurable and isn't approximated here.
 - **Only one cold-index run, not three, at the 100K+ tier**: a single run cost 9-10 minutes, making repeated averaging impractical. `rust-lang/rust` was not attempted.
 
 ## Methodology
@@ -281,7 +291,7 @@ Pass `file` (and `line`, if the file still has more than one match) — exactly 
 
 `audit`'s query log (`.corbel/audit.jsonl`) is a plain JSON-Lines file; a line that fails to parse (partial write, disk corruption) is indistinguishable from a query that never happened unless it's counted separately. `audit` counts and reports unparseable lines rather than silently dropping them, so a corrupted log reads as "N lines corrupted," not as a lower, wrong query count.
 
-`audit` approximates a symbol's body as running from its own definition line up to (but not including) the next symbol's definition line, sorted by line — the schema doesn't record where a symbol's body actually ends. This breaks down for the *last* symbol in a file: with no following symbol to bound it, its approximated body extends to end-of-file, so appending a brand-new top-level symbol after it is reported as a change to the last *existing* symbol instead of being recognized as a new one. A precise fix requires the indexer to record each symbol's end line, which it does not today; this is a known, accepted source of false positives for changes made at the very end of a file, not a bug to be silently worked around.
+`audit` maps a changed line range to the symbol it falls in using each symbol's actual indexed `line`..=`end_line` span — `end_line` comes straight from the tree-sitter definition node's own end position at index time, not an approximation. Appending a brand-new top-level symbol at the end of a file is recognized as touching no existing symbol, not misattributed to whatever symbol used to be last.
 
 **Observed, not yet acted on:** in one real run against corbel's own repo, `resolve_all`'s coverage came back 1/91 (1%) inspected — technically correct (`impact()` had been called, and only one of its 91 callers had been separately inspected via `get_symbol`), but the denominator was dominated by 90 test-function callers, with the one production caller (`index_repo`) among them. A coverage fraction that's structurally near-zero whenever a function has many test callers risks training users to ignore the number rather than act on it. Whether test callers belong in the denominator at all is an open question, deferred until there's more real usage to judge it against — noted here rather than changed speculatively.
 
