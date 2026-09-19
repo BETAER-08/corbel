@@ -1,6 +1,6 @@
 [package]
 name = "corbel-core"
-description = "Core indexing, symbol resolution, and query engine for corbel"
+description = "Core indexing, symbol resolution, and query engine for corbel. Maintenance mode as of 1.0.0."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

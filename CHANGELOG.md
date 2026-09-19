@@ -7,6 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-19
+
+### Added
+
+- Optional `depth` parameter for the `impact` MCP tool: caps how many
+  call-graph hops the reverse-call-graph walk takes (`0` = target only,
+  `1` = direct callers, and so on), clamped to corbel's internal maximum of
+  10. Omitting it preserves the pre-1.0 default exactly (walk to depth 10 or
+  budget exhaustion). Each result now also reports `depth_limit` (the
+  ceiling actually applied) and `depth_truncated` (whether that ceiling, as
+  opposed to the token budget, is what stopped the walk), so a caller can
+  tell which limit was hit.
+- Index schema: symbols now record `end_line`, extracted directly from the
+  tree-sitter definition node's own end position at index time, in all five
+  supported languages (Rust, Python, TypeScript, TSX, JavaScript).
+
+### Fixed
+
+- `corbel audit` no longer approximates a symbol's body range as "from its
+  own definition line to the next symbol's definition line" (with the last
+  symbol in a file approximated as extending to `u32::MAX`). It now uses the
+  indexed `end_line` directly. This closes the false positive where
+  appending a brand-new top-level symbol at the end of a file was reported
+  as a change to the previously-last symbol instead of being recognized as
+  touching no existing symbol.
+
+### Changed
+
+- **BREAKING:** index schema v4 → v5 (adds `symbols.end_line`). Existing
+  indexes must be rebuilt with `corbel index`; `corbel serve` refuses to
+  open a v4-or-earlier index and tells you to reindex rather than silently
+  operating on stale data.
+
+### Project status
+
+**corbel enters maintenance mode as of this release.** It is
+feature-complete; the API is stable and the tool remains installable.
+
+- **In scope going forward:** dependency and toolchain changes that break
+  the build; security advisories (`cargo audit`); clear malfunctions in
+  existing functionality.
+- **Out of scope:** new features, new language support, performance work,
+  accuracy work.
+- Best-effort only; no response time is promised. Feature request issues
+  will be closed.
+
+### Known limitations (unchanged in 1.0.0)
+
+These are not gaps corbel failed to close — they are explicitly out of
+scope for maintenance mode and will not be revisited:
+
+- `find`'s substring query can't use the symbol-name index and does a full
+  table scan every call (observed p99 122ms at ~116K symbols).
+- Name collisions leave calls unresolved rather than guessed: 93.3% of
+  internal calls resolve on corbel's own source; the rest are ambiguous
+  bare names with nothing in scope to disambiguate.
+- Dynamic dispatch, macro-generated code, runtime prototype assembly (e.g.
+  `chevrotain`'s `applyMixins`), and duck typing remain structurally
+  unresolvable by static analysis and are reported as `external` or
+  `unresolved` rather than guessed.
+- The benchmark's callees (T2) task has **no golden-set answers and is
+  permanently disabled** — there is no plan to fill it in.
+- corbel's overall F1 (0.707) remains behind the `ripgrep+ctags` baseline
+  (0.713) at 1.0.0; see
+  [benchmarks/results/benchmark-20260919T025532Z-analysis.md](benchmarks/results/benchmark-20260919T025532Z-analysis.md).
+
 ## [0.3.0] - 2026-09-13
 
 ### Added

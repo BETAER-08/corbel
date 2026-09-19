@@ -1,6 +1,6 @@
 [package]
 name = "corbel-lang"
-description = "Language support plugins for corbel"
+description = "Language support plugins for corbel. Maintenance mode as of 1.0.0."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -1,6 +1,6 @@
 [package]
 name = "corbel"
-description = "MCP server that gives coding agents an accurate call graph of your codebase"
+description = "MCP server that gives coding agents an accurate call graph of your codebase. Feature-complete as of 1.0.0; in maintenance mode (bug fixes and security updates only, no new features)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

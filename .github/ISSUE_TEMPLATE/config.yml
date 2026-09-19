@@ -1,1 +1,11 @@
 blank_issues_enabled: false
+contact_links:
+  - name: Maintenance mode notice
+    url: https://github.com/BETAER-08/corbel#readme
+    about: >-
+      corbel is in maintenance mode as of 1.0.0 (see the README's status
+      banner): dependency/toolchain breakage, security advisories, and
+      clear malfunctions are in scope. Feature requests, new language
+      support, performance work, and accuracy work are out of scope and
+      will be closed — there is no feature-request template for this
+      reason.

@@ -2,6 +2,13 @@ name: Bug report
 description: Report incorrect behavior in corbel
 labels: ["bug"]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        corbel is in maintenance mode as of 1.0.0 — bug reports are still
+        welcome, but triage and fixes are best-effort with no response
+        time promised.
+
   - type: input
     id: version
     attributes:
