@@ -34,6 +34,13 @@ python3 benchmarks/harness/run_benchmark.py
   T2 (callees) excluded by default, `BENCHMARK_TOKEN_BUDGET = 1,000,000`.
 - **Truncated cases: 0** — no precision/recall number below is a truncation
   artifact.
+- Diffing this run's raw per-repo aggregate table rows against the 0.3.0
+  baseline run's is not byte-for-byte empty: the query-time column (e.g.
+  `0.052` vs `0.051`, `0.286` vs `0.291`) differs by ordinary run-to-run
+  wall-clock jitter, for corbel and for every comparison tool alike. Every
+  precision/recall/F1/TP/FP/FN column, for every tool, in every repo, is
+  identical between the two runs — verified directly, not inferred from the
+  row diff being clean.
 
 ## 1. Overall precision / recall / F1 — before / after
 
@@ -54,10 +61,12 @@ Summed over all non-ambiguous T1+T4 entries across all three repos.
 `symbols_touched_by_ranges`, which this benchmark harness never calls, and
 Part B (`impact`'s optional `depth`) is fully opt-in — every benchmark call
 omits `depth`, which preserves the pre-1.0 default (walk to depth 10 or
-budget exhaustion) exactly. corbel's per-repo TP/FP/FN are byte-for-byte
-identical to the 0.3.0 baseline in every repo (chevrotain 178/27/39,
-hyperfine 99/70/104, itsdangerous 81/50/7), confirming neither change
-altered any code path this harness exercises.
+budget exhaustion) exactly. corbel's own per-repo TP/FP/FN are byte-for-byte
+identical between this run and the 0.3.0 run (chevrotain 178/27/39,
+hyperfine 99/70/104, itsdangerous 81/50/7 in both), confirming neither
+change altered any code path this harness exercises. (This is a corbel vs.
+corbel comparison across time, not a comparison against `ripgrep+ctags` —
+see the next paragraph for that.)
 
 corbel's F1 (0.707) remains essentially tied with `ripgrep+ctags` (0.713)
 and still behind it — **corbel does not win this comparison at 1.0.0**. The
