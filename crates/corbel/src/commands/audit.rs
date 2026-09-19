@@ -422,39 +422,22 @@ fn parse_hunk_old_range(hunk: &str) -> Option<(u32, u32)> {
     Some((start, count))
 }
 
-/// Approximates which symbols a set of changed line ranges touch. The
-/// schema doesn't record where a symbol's body ends, so this treats each
-/// symbol as spanning from its own definition line up to (but not
-/// including) the next symbol's definition line — sorted by `line`
-/// ascending. `symbols` is sorted defensively here (rather than trusting
-/// the caller) even though `query::symbols_in_file`'s SQL already returns
-/// rows `ORDER BY line`; this keeps the function correct on its own terms
-/// if that query ever changes or a different caller feeds it unsorted data.
-///
-/// Known limitation: the *last* symbol in a file has no following symbol to
-/// bound it, so its approximated body extends to end-of-file (line
-/// `u32::MAX`). Appending a brand-new top-level symbol after it produces a
-/// diff hunk in that same trailing region, so it is reported as a change to
-/// the last *existing* symbol rather than recognized as a new one. A
-/// precise fix requires the indexer to record each symbol's end line, which
-/// it does not today — this is a known false-positive source, not a bug to
-/// silently paper over. See README.md's "audit's known limitations" section.
+/// Determines which symbols a set of changed line ranges touch, using each
+/// symbol's actual indexed `line`..=`end_line` span (the indexer records
+/// `end_line` from the tree-sitter definition node's own end position, so
+/// this is exact, not an approximation of where a symbol's body ends).
+/// `symbols` doesn't need to be pre-sorted; each symbol's span is checked
+/// against every range independently.
 fn symbols_touched_by_ranges(symbols: &[SymbolInfo], ranges: &[(u32, u32)]) -> Vec<SymbolInfo> {
-    let mut sorted: Vec<&SymbolInfo> = symbols.iter().collect();
-    sorted.sort_by_key(|s| s.line);
-
     let mut touched = Vec::new();
-    for (index, symbol) in sorted.iter().enumerate() {
-        let end = sorted
-            .get(index + 1)
-            .map(|next| next.line.saturating_sub(1))
-            .unwrap_or(u32::MAX);
+    for symbol in symbols {
         let start = symbol.line;
+        let end = symbol.end_line;
         if ranges
             .iter()
             .any(|&(hunk_start, hunk_end)| start <= hunk_end && end >= hunk_start)
         {
-            touched.push((*symbol).clone());
+            touched.push(symbol.clone());
         }
     }
     touched
@@ -514,12 +497,12 @@ mod tests {
         assert_eq!(parse_diff_path("/dev/null"), None);
     }
 
-    fn symbol(name: &str, line: u32) -> SymbolInfo {
+    fn symbol(name: &str, line: u32, end_line: u32) -> SymbolInfo {
         SymbolInfo {
             name: name.to_string(),
             file: "a.rs".to_string(),
             line,
-            end_line: line,
+            end_line,
             kind: "function".to_string(),
             signature: None,
             is_public: true,
@@ -528,23 +511,43 @@ mod tests {
 
     #[test]
     fn symbols_touched_by_ranges_matches_overlapping_symbol_only() {
-        let symbols = vec![symbol("a", 1), symbol("b", 10), symbol("c", 20)];
+        let symbols = vec![symbol("a", 1, 3), symbol("b", 10, 15), symbol("c", 20, 25)];
         let touched = symbols_touched_by_ranges(&symbols, &[(10, 12)]);
-        assert_eq!(touched, vec![symbol("b", 10)]);
+        assert_eq!(touched, vec![symbol("b", 10, 15)]);
+    }
+
+    /// Regression test for the pre-`end_line` false positive: the last
+    /// symbol in a file used to be approximated as spanning to
+    /// end-of-file, so a diff hunk appending a brand-new top-level symbol
+    /// after it was misattributed to that last existing symbol. With real
+    /// `end_line` boundaries, a hunk past the last symbol's actual body
+    /// touches no indexed symbol at all.
+    #[test]
+    fn symbols_touched_by_ranges_does_not_flag_last_symbol_for_appended_symbol() {
+        let symbols = vec![symbol("a", 1, 3), symbol("b", 10, 15)];
+        let touched = symbols_touched_by_ranges(&symbols, &[(20, 22)]);
+        assert!(touched.is_empty());
     }
 
     #[test]
-    fn symbols_touched_by_ranges_covers_last_symbol_to_end_of_file() {
-        let symbols = vec![symbol("a", 1), symbol("b", 10)];
-        let touched = symbols_touched_by_ranges(&symbols, &[(1000, 1000)]);
-        assert_eq!(touched, vec![symbol("b", 10)]);
+    fn symbols_touched_by_ranges_flags_last_symbol_for_its_own_body_edit() {
+        let symbols = vec![symbol("a", 1, 3), symbol("b", 10, 15)];
+        let touched = symbols_touched_by_ranges(&symbols, &[(12, 12)]);
+        assert_eq!(touched, vec![symbol("b", 10, 15)]);
     }
 
     #[test]
-    fn symbols_touched_by_ranges_sorts_unsorted_input_by_line() {
-        let symbols = vec![symbol("c", 20), symbol("a", 1), symbol("b", 10)];
+    fn symbols_touched_by_ranges_ignores_gap_between_symbols() {
+        let symbols = vec![symbol("a", 1, 3), symbol("b", 10, 15)];
+        let touched = symbols_touched_by_ranges(&symbols, &[(5, 8)]);
+        assert!(touched.is_empty());
+    }
+
+    #[test]
+    fn symbols_touched_by_ranges_does_not_require_sorted_input() {
+        let symbols = vec![symbol("c", 20, 25), symbol("a", 1, 3), symbol("b", 10, 15)];
         let touched = symbols_touched_by_ranges(&symbols, &[(10, 12)]);
-        assert_eq!(touched, vec![symbol("b", 10)]);
+        assert_eq!(touched, vec![symbol("b", 10, 15)]);
     }
 
     #[test]
