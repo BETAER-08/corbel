@@ -33,11 +33,44 @@ jobs:
             exit 0
           fi
 
+          # GitHub-run bots (Dependabot, the github-actions bot) commit through
+          # GitHub's own API with an author address only GitHub can mint
+          # (<numeric-id>+<name>[bot]@users.noreply.github.com) and a
+          # committer address of noreply@github.com. DCO certifies that a
+          # human contributor has the right to submit the code, which doesn't
+          # apply to these automated commits, so they're exempt. Scoped to
+          # the two bot names this repo actually uses rather than any "[bot]"
+          # suffix, so the exception can't be widened by an arbitrary author
+          # name alone.
+          #
+          # This is a string-match heuristic, not a cryptographic guarantee:
+          # nothing stops a contributor with direct push access from setting
+          # a local git config that mimics these addresses. Verifying via the
+          # GitHub API (commit.verification.verified / the committer's actual
+          # App identity) would close that gap, but was deliberately left out
+          # here: this repo takes contributions through PRs from branches
+          # within the same repo (no forks with a separate untrusted commit
+          # path), so the person who could forge the addresses already has
+          # push access and could bypass DCO by other means too. Add the API
+          # check if the threat model changes (e.g. external forks start
+          # contributing).
+          is_exempt_bot() {
+            local author_email="$1" committer_email="$2"
+            [ "$committer_email" = "noreply@github.com" ] || return 1
+            printf '%s\n' "$author_email" \
+              | grep -qE '^[0-9]+\+(dependabot|github-actions)\[bot\]@users\.noreply\.github\.com$'
+          }
+
           failed=0
           for sha in $commits; do
             author_email=$(git log -1 --format='%ae' "$sha")
             committer_email=$(git log -1 --format='%ce' "$sha")
             body=$(git log -1 --format='%B' "$sha")
+
+            if is_exempt_bot "$author_email" "$committer_email"; then
+              echo "$sha: ok (exempt bot commit: $author_email)"
+              continue
+            fi
 
             match=$(printf '%s\n' "$body" | grep -iE "^Signed-off-by: .+ <(${author_email//./\\.}|${committer_email//./\\.})>\$" || true)
 
