@@ -43,6 +43,27 @@ fn extract_symbols_finds_expected_count() {
 }
 
 #[test]
+fn end_lines_match_fixture() {
+    let support = JavaScriptSupport;
+    let src = fixture_src();
+    let symbols = support.extract_symbols(&src);
+
+    let expected: &[(&str, u32)] = &[
+        ("pub", 3),
+        ("priv", 7),
+        ("Foo", 32),
+        ("constructor", 22),
+        ("pubMethod", 27),
+        ("caller", 38),
+    ];
+
+    for (name, end_line) in expected {
+        let symbol = symbols.iter().find(|s| &s.name == name).unwrap();
+        assert_eq!(symbol.end_line, *end_line, "end_line mismatch for {name}");
+    }
+}
+
+#[test]
 fn export_based_visibility_is_detected() {
     let support = JavaScriptSupport;
     let src = fixture_src();

@@ -105,6 +105,27 @@ fn line_numbers_match_fixture() {
 }
 
 #[test]
+fn end_lines_match_fixture() {
+    let support = RustSupport;
+    let src = fixture_src();
+    let symbols = support.extract_symbols(&src);
+
+    let expected: &[(&str, u32)] = &[
+        ("add", 3),
+        ("helper", 7),
+        ("Point", 12),
+        ("Shape", 16),
+        ("new", 21),
+        ("distance_from_origin", 25),
+    ];
+
+    for (name, end_line) in expected {
+        let symbol = symbols.iter().find(|s| &s.name == name).unwrap();
+        assert_eq!(symbol.end_line, *end_line, "end_line mismatch for {name}");
+    }
+}
+
+#[test]
 fn reference_query_captures_call_expressions() {
     let support = RustSupport;
     let src = fixture_src();

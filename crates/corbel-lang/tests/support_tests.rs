@@ -6,6 +6,7 @@ fn raw_symbol_is_debug_clone_partial_eq() {
         name: "foo".to_string(),
         kind: "function".to_string(),
         line: 1,
+        end_line: 3,
         signature: Some("fn foo()".to_string()),
         is_public: true,
         owner: None,

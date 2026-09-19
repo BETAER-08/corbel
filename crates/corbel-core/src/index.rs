@@ -126,13 +126,14 @@ pub fn index_repo(
 
         for symbol in &parsed.symbols {
             tx.execute(
-                "INSERT INTO symbols (file_id, name, kind, line, signature, is_public, owner)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO symbols (file_id, name, kind, line, end_line, signature, is_public, owner)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![
                     file_id,
                     symbol.name,
                     symbol.kind,
                     symbol.line,
+                    symbol.end_line,
                     symbol.signature,
                     symbol.is_public,
                     symbol.owner,

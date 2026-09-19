@@ -101,6 +101,7 @@ impl FileParser for LanguageRegistry {
                 name: raw.name,
                 kind: raw.kind,
                 line: raw.line,
+                end_line: raw.end_line,
                 signature: raw.signature,
                 is_public: raw.is_public,
                 owner: raw.owner,

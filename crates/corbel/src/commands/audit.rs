@@ -519,6 +519,7 @@ mod tests {
             name: name.to_string(),
             file: "a.rs".to_string(),
             line,
+            end_line: line,
             kind: "function".to_string(),
             signature: None,
             is_public: true,

@@ -5,6 +5,7 @@ pub struct Symbol {
     pub name: String,
     pub kind: String,
     pub line: u32,
+    pub end_line: u32,
     pub signature: Option<String>,
     pub is_public: bool,
     pub owner: Option<String>,

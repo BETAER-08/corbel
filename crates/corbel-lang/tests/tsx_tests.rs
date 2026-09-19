@@ -53,6 +53,20 @@ fn extract_symbols_finds_expected_count() {
 }
 
 #[test]
+fn end_lines_match_fixture() {
+    let support = TsxSupport;
+    let src = fixture_src();
+    let symbols = support.extract_symbols(&src);
+
+    let expected: &[(&str, u32)] = &[("Comp", 12), ("plain", 20), ("helper", 24), ("caller", 29)];
+
+    for (name, end_line) in expected {
+        let symbol = symbols.iter().find(|s| &s.name == name).unwrap();
+        assert_eq!(symbol.end_line, *end_line, "end_line mismatch for {name}");
+    }
+}
+
+#[test]
 fn export_based_visibility_matches_typescript_behavior() {
     let support = TsxSupport;
     let src = fixture_src();

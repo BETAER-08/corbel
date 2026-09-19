@@ -115,6 +115,27 @@ fn line_numbers_match_fixture() {
 }
 
 #[test]
+fn end_lines_match_fixture() {
+    let support = PythonSupport;
+    let src = fixture_src();
+    let symbols = support.extract_symbols(&src);
+
+    let expected: &[(&str, u32)] = &[
+        ("add", 2),
+        ("_helper", 6),
+        ("Point", 21),
+        ("__init__", 12),
+        ("_private", 15),
+        ("caller", 27),
+    ];
+
+    for (name, end_line) in expected {
+        let symbol = symbols.iter().find(|s| &s.name == name).unwrap();
+        assert_eq!(symbol.end_line, *end_line, "end_line mismatch for {name}");
+    }
+}
+
+#[test]
 fn reference_query_captures_calls() {
     let support = PythonSupport;
     let src = fixture_src();

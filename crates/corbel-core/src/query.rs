@@ -12,6 +12,7 @@ pub struct SymbolInfo {
     pub name: String,
     pub file: String,
     pub line: u32,
+    pub end_line: u32,
     pub kind: String,
     pub signature: Option<String>,
     pub is_public: bool,
@@ -58,7 +59,7 @@ fn find_symbol_rows(
     let sql = match (file, line) {
         (Some(_), Some(_)) => {
             "SELECT symbols.id, symbols.file_id, symbols.name, symbols.kind, symbols.line,
-                    symbols.signature, symbols.is_public, files.path
+                    symbols.end_line, symbols.signature, symbols.is_public, files.path
              FROM symbols
              JOIN files ON files.id = symbols.file_id
              WHERE symbols.name = ?1 AND files.path = ?2 AND symbols.line = ?3
@@ -66,7 +67,7 @@ fn find_symbol_rows(
         }
         (Some(_), None) => {
             "SELECT symbols.id, symbols.file_id, symbols.name, symbols.kind, symbols.line,
-                    symbols.signature, symbols.is_public, files.path
+                    symbols.end_line, symbols.signature, symbols.is_public, files.path
              FROM symbols
              JOIN files ON files.id = symbols.file_id
              WHERE symbols.name = ?1 AND files.path = ?2
@@ -74,7 +75,7 @@ fn find_symbol_rows(
         }
         (None, _) => {
             "SELECT symbols.id, symbols.file_id, symbols.name, symbols.kind, symbols.line,
-                    symbols.signature, symbols.is_public, files.path
+                    symbols.end_line, symbols.signature, symbols.is_public, files.path
              FROM symbols
              JOIN files ON files.id = symbols.file_id
              WHERE symbols.name = ?1
@@ -99,9 +100,10 @@ fn map_symbol_row(row: &rusqlite::Row) -> rusqlite::Result<SymbolRow> {
             name: row.get(2)?,
             kind: row.get(3)?,
             line: row.get(4)?,
-            signature: row.get(5)?,
-            is_public: row.get(6)?,
-            file: row.get(7)?,
+            end_line: row.get(5)?,
+            signature: row.get(6)?,
+            is_public: row.get(7)?,
+            file: row.get(8)?,
         },
     })
 }
@@ -211,8 +213,8 @@ fn budget_callees(
 
 pub fn symbols_in_file(conn: &Connection, file: &str) -> Result<Vec<SymbolInfo>> {
     let mut stmt = conn.prepare(
-        "SELECT symbols.name, symbols.kind, symbols.line, symbols.signature, symbols.is_public,
-                files.path
+        "SELECT symbols.name, symbols.kind, symbols.line, symbols.end_line, symbols.signature,
+                symbols.is_public, files.path
          FROM symbols
          JOIN files ON files.id = symbols.file_id
          WHERE files.path = ?1
@@ -223,9 +225,10 @@ pub fn symbols_in_file(conn: &Connection, file: &str) -> Result<Vec<SymbolInfo>>
             name: row.get(0)?,
             kind: row.get(1)?,
             line: row.get(2)?,
-            signature: row.get(3)?,
-            is_public: row.get(4)?,
-            file: row.get(5)?,
+            end_line: row.get(3)?,
+            signature: row.get(4)?,
+            is_public: row.get(5)?,
+            file: row.get(6)?,
         })
     })?;
     rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
