@@ -45,7 +45,7 @@ pub fn list_tools() -> Vec<Value> {
         }),
         json!({
             "name": "impact",
-            "description": "Trace the blast radius of changing a symbol: starting from the given symbol, walk the reverse call graph — direct callers, their callers, and so on across multiple hops — and return every symbol that could be affected by a change to it. Each affected symbol comes with a `depth` field (how many hops away it is) and a `resolution` field naming which index-wide lookup resolved that call edge (e.g. same-file, scoped, global-unique — `scoped`/`global-unique` both mean a single matching definition was found index-wide, see docs/mcp-tools.md), so results are grounded in real, resolved call relationships rather than a text search for the symbol's name (which cannot follow more than one hop and cannot tell a real call from a coincidental name match). Use this tool before refactoring — e.g. changing a function's signature or behavior — to find every place in the codebase that may need to change as a result, including indirect callers that a single-hop \"find references\" would miss. The response can be truncated to fit within a token budget; when it is, `truncated` is set to true and `truncated_count` reports how many additional affected symbols were left out. Results come from the local corbel index built by `corbel index` and only reflect the repository as of the last index run.",
+            "description": "Trace the blast radius of changing a symbol: starting from the given symbol, walk the reverse call graph — direct callers, their callers, and so on across multiple hops — and return every symbol that could be affected by a change to it. Each affected symbol comes with a `depth` field (how many hops away it is) and a `resolution` field naming which index-wide lookup resolved that call edge (e.g. same-file, scoped, global-unique — `scoped`/`global-unique` both mean a single matching definition was found index-wide, see docs/mcp-tools.md), so results are grounded in real, resolved call relationships rather than a text search for the symbol's name (which cannot follow more than one hop and cannot tell a real call from a coincidental name match). Use this tool before refactoring — e.g. changing a function's signature or behavior — to find every place in the codebase that may need to change as a result, including indirect callers that a single-hop \"find references\" would miss. The response can be truncated to fit within a token budget and/or a hop-count `depth`; when either limit is hit, the corresponding flag is set (`truncated`/`truncated_count` for the budget, `depth_truncated` for depth) so a caller can tell which one cut the walk short. Results come from the local corbel index built by `corbel index` and only reflect the repository as of the last index run.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -56,6 +56,10 @@ pub fn list_tools() -> Vec<Value> {
                     "file": {
                         "type": "string",
                         "description": "Optional file path to disambiguate when multiple symbols share this name."
+                    },
+                    "depth": {
+                        "type": "number",
+                        "description": "Optional cap on how many call-graph hops to walk outward (0 returns no affected symbols, 1 returns only direct callers, and so on). Defaults to corbel's internal maximum of 10 if omitted, which is also the hard ceiling — values above 10 are clamped to 10. Whichever of `depth` and `token_budget` is hit first stops the walk; `depth_truncated` in the response is true only if the depth ceiling (not the budget) is what stopped it."
                     },
                     "token_budget": {
                         "type": "number",
@@ -131,6 +135,18 @@ fn optional_line(arguments: &Value) -> Result<Option<u32>, ToolCallError> {
             Some(line) => Ok(Some(line)),
             None => Err(ToolCallError::InvalidParams(
                 "argument \"line\" must be a non-negative number".to_string(),
+            )),
+        },
+    }
+}
+
+fn optional_depth(arguments: &Value) -> Result<Option<u32>, ToolCallError> {
+    match arguments.get("depth") {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => match value.as_u64().and_then(|depth| u32::try_from(depth).ok()) {
+            Some(depth) => Ok(Some(depth)),
+            None => Err(ToolCallError::InvalidParams(
+                "argument \"depth\" must be a non-negative number".to_string(),
             )),
         },
     }
@@ -256,6 +272,8 @@ fn impact_payload(name: &str, results: &[ImpactResult]) -> Value {
                 "truncated": result.truncated,
                 "truncated_count": result.truncated_count,
                 "max_depth_reached": result.max_depth_reached,
+                "depth_limit": result.depth_limit,
+                "depth_truncated": result.depth_truncated,
                 "affected_count": result.affected.len(),
                 "affected": result.affected.iter().map(|node| json!({
                     "name": qualified_display_name(&node.name, node.owner.as_deref(), &node.lang),
@@ -344,10 +362,17 @@ pub fn call_get_symbol(conn: &Connection, arguments: &Value) -> Result<Value, To
 pub fn call_impact(conn: &Connection, arguments: &Value) -> Result<Value, ToolCallError> {
     let name = required_string(arguments, "name")?;
     let file = optional_string(arguments, "file")?;
+    let depth = optional_depth(arguments)?;
     let token_budget = optional_token_budget(arguments, DEFAULT_IMPACT_TOKEN_BUDGET)?;
 
-    let results = query::impact(conn, &name, file.as_deref(), TokenBudget::new(token_budget))
-        .map_err(|err| ToolCallError::Internal(err.to_string()))?;
+    let results = query::impact(
+        conn,
+        &name,
+        file.as_deref(),
+        TokenBudget::new(token_budget),
+        depth,
+    )
+    .map_err(|err| ToolCallError::Internal(err.to_string()))?;
 
     Ok(tool_text_response(impact_payload(&name, &results)))
 }

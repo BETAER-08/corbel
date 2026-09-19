@@ -293,12 +293,22 @@ pub struct ImpactResult {
     pub truncated: bool,
     pub truncated_count: usize,
     pub max_depth_reached: u32,
+    /// The depth ceiling applied to this traversal (the caller-supplied
+    /// `depth`, or `MAX_IMPACT_DEPTH` when none was given).
+    pub depth_limit: u32,
+    /// True when the traversal stopped expanding a node purely because it
+    /// had already reached `depth_limit`, and that node had further callers
+    /// beyond it that were never explored. Distinguishes "cut off by depth"
+    /// from "cut off by budget" (`truncated`): a result can be `truncated`,
+    /// `depth_truncated`, both, or neither.
+    pub depth_truncated: bool,
 }
 
 fn impact_for_symbol(
     conn: &Connection,
     symbol_row: &SymbolRow,
     budget: &mut TokenBudget,
+    depth_limit: u32,
 ) -> Result<ImpactResult> {
     let mut visited: HashSet<i64> = HashSet::new();
     visited.insert(symbol_row.id);
@@ -311,9 +321,13 @@ fn impact_for_symbol(
     let mut truncated = false;
     let mut truncated_count = 0usize;
     let mut max_depth_reached = 0u32;
+    let mut depth_truncated = false;
 
     while let Some((current_file_id, current_name, depth)) = queue.pop_front() {
-        if depth >= MAX_IMPACT_DEPTH {
+        if depth >= depth_limit {
+            if !find_caller_rows(conn, current_file_id, &current_name)?.is_empty() {
+                depth_truncated = true;
+            }
             continue;
         }
 
@@ -369,20 +383,39 @@ fn impact_for_symbol(
         truncated,
         truncated_count,
         max_depth_reached,
+        depth_limit,
+        depth_truncated,
     })
 }
 
+/// Traces the reverse call graph from `name` (optionally narrowed by
+/// `file`). `depth` caps how many hops outward the traversal walks: `None`
+/// keeps the pre-existing behavior of walking to `MAX_IMPACT_DEPTH` (10) or
+/// until `budget` is exhausted, whichever comes first; `Some(d)` caps the
+/// walk at `d` hops (clamped to `MAX_IMPACT_DEPTH`) if reached before the
+/// budget is. Each `ImpactResult` reports `depth_limit` and
+/// `depth_truncated` so callers can tell whether depth or budget is what cut
+/// the traversal short.
 pub fn impact(
     conn: &Connection,
     name: &str,
     file: Option<&str>,
     mut budget: TokenBudget,
+    depth: Option<u32>,
 ) -> Result<Vec<ImpactResult>> {
     let symbol_rows = find_symbol_rows(conn, name, file, None)?;
+    let depth_limit = depth
+        .map(|d| d.min(MAX_IMPACT_DEPTH))
+        .unwrap_or(MAX_IMPACT_DEPTH);
 
     let mut results = Vec::with_capacity(symbol_rows.len());
     for symbol_row in &symbol_rows {
-        results.push(impact_for_symbol(conn, symbol_row, &mut budget)?);
+        results.push(impact_for_symbol(
+            conn,
+            symbol_row,
+            &mut budget,
+            depth_limit,
+        )?);
     }
 
     Ok(results)

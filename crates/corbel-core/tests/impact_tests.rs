@@ -36,7 +36,7 @@ fn direct_caller_is_captured_at_depth_one() {
     let parser = registry();
     index_repo(&root, &conn, &parser).unwrap();
 
-    let results = impact(&conn, "t", None, generous_budget()).unwrap();
+    let results = impact(&conn, "t", None, generous_budget(), None).unwrap();
     assert_eq!(results.len(), 1);
     let result = &results[0];
 
@@ -62,7 +62,7 @@ fn multi_level_chain_is_captured_with_increasing_depth() {
     let parser = registry();
     index_repo(&root, &conn, &parser).unwrap();
 
-    let results = impact(&conn, "t", None, generous_budget()).unwrap();
+    let results = impact(&conn, "t", None, generous_budget(), None).unwrap();
     assert_eq!(results.len(), 1);
     let result = &results[0];
 
@@ -94,7 +94,7 @@ fn cycle_terminates_without_infinite_loop_and_visits_each_symbol_once() {
     let parser = registry();
     index_repo(&root, &conn, &parser).unwrap();
 
-    let results = impact(&conn, "t", None, generous_budget()).unwrap();
+    let results = impact(&conn, "t", None, generous_budget(), None).unwrap();
     assert_eq!(results.len(), 1);
     let result = &results[0];
 
@@ -125,7 +125,7 @@ fn symbol_reached_via_multiple_paths_keeps_shortest_depth() {
     let parser = registry();
     index_repo(&root, &conn, &parser).unwrap();
 
-    let results = impact(&conn, "t", None, generous_budget()).unwrap();
+    let results = impact(&conn, "t", None, generous_budget(), None).unwrap();
     assert_eq!(results.len(), 1);
     let result = &results[0];
 
@@ -167,7 +167,7 @@ fn tight_budget_truncates_and_keeps_closest_nodes() {
         + estimate_node_tokens("caller_b", "caller_b.rs", 1, "global-unique");
     let budget = TokenBudget::new(tight_limit);
 
-    let results = impact(&conn, "t", None, budget).unwrap();
+    let results = impact(&conn, "t", None, budget, None).unwrap();
     assert_eq!(results.len(), 1);
     let result = &results[0];
 
@@ -191,7 +191,7 @@ fn generous_budget_captures_full_graph_without_truncation() {
     let parser = registry();
     index_repo(&root, &conn, &parser).unwrap();
 
-    let results = impact(&conn, "t", None, generous_budget()).unwrap();
+    let results = impact(&conn, "t", None, generous_budget(), None).unwrap();
     let result = &results[0];
 
     assert!(!result.truncated);
@@ -213,7 +213,7 @@ fn outgoing_external_call_from_target_is_irrelevant_to_impact() {
     let parser = registry();
     index_repo(&root, &conn, &parser).unwrap();
 
-    let results = impact(&conn, "t", None, generous_budget()).unwrap();
+    let results = impact(&conn, "t", None, generous_budget(), None).unwrap();
     assert_eq!(results.len(), 1);
     assert!(results[0].affected.is_empty());
 }
@@ -228,7 +228,7 @@ fn symbol_with_no_callers_has_empty_affected() {
     let parser = registry();
     index_repo(&root, &conn, &parser).unwrap();
 
-    let results = impact(&conn, "lonely", None, generous_budget()).unwrap();
+    let results = impact(&conn, "lonely", None, generous_budget(), None).unwrap();
     assert_eq!(results.len(), 1);
     assert!(results[0].affected.is_empty());
     assert!(!results[0].truncated);
@@ -254,7 +254,7 @@ fn duplicate_name_across_files_produces_independent_impact_graphs() {
     let parser = registry();
     index_repo(&root, &conn, &parser).unwrap();
 
-    let results = impact(&conn, "shared", None, generous_budget()).unwrap();
+    let results = impact(&conn, "shared", None, generous_budget(), None).unwrap();
     assert_eq!(results.len(), 2);
 
     let p_result = results.iter().find(|r| r.target.file == "p.rs").unwrap();
@@ -264,4 +264,74 @@ fn duplicate_name_across_files_produces_independent_impact_graphs() {
     let q_result = results.iter().find(|r| r.target.file == "q.rs").unwrap();
     assert_eq!(q_result.affected.len(), 1);
     assert_eq!(q_result.affected[0].name, "call_q");
+}
+
+fn chain_repo() -> (Connection, tempfile::TempDir, tempfile::TempDir) {
+    let repo_dir = tempdir().unwrap();
+    fs::write(repo_dir.path().join("a.rs"), b"pub fn a() {\n    b();\n}\n").unwrap();
+    fs::write(repo_dir.path().join("b.rs"), b"pub fn b() {\n    c();\n}\n").unwrap();
+    fs::write(repo_dir.path().join("c.rs"), b"pub fn c() {\n    t();\n}\n").unwrap();
+    fs::write(repo_dir.path().join("t.rs"), b"pub fn t() {}\n").unwrap();
+
+    let root = RepoRoot::new(repo_dir.path()).unwrap();
+    let (conn, db_dir) = db();
+    let parser = registry();
+    index_repo(&root, &conn, &parser).unwrap();
+    (conn, db_dir, repo_dir)
+}
+
+#[test]
+fn depth_zero_returns_target_only_and_reports_depth_truncated() {
+    let (conn, _db_dir, _repo_dir) = chain_repo();
+
+    let results = impact(&conn, "t", None, generous_budget(), Some(0)).unwrap();
+    assert_eq!(results.len(), 1);
+    let result = &results[0];
+
+    assert!(result.affected.is_empty());
+    assert_eq!(result.depth_limit, 0);
+    assert!(result.depth_truncated);
+    assert!(!result.truncated);
+}
+
+#[test]
+fn depth_one_returns_only_direct_callers() {
+    let (conn, _db_dir, _repo_dir) = chain_repo();
+
+    let results = impact(&conn, "t", None, generous_budget(), Some(1)).unwrap();
+    let result = &results[0];
+
+    assert_eq!(result.affected.len(), 1);
+    assert_eq!(result.affected[0].name, "c");
+    assert_eq!(result.depth_limit, 1);
+    assert!(result.depth_truncated);
+}
+
+#[test]
+fn depth_two_stops_two_hops_out() {
+    let (conn, _db_dir, _repo_dir) = chain_repo();
+
+    let results = impact(&conn, "t", None, generous_budget(), Some(2)).unwrap();
+    let result = &results[0];
+
+    assert_eq!(result.affected.len(), 2);
+    let names: Vec<&str> = result.affected.iter().map(|n| n.name.as_str()).collect();
+    assert!(names.contains(&"c"));
+    assert!(names.contains(&"b"));
+    assert!(!names.contains(&"a"));
+    assert_eq!(result.depth_limit, 2);
+    assert!(result.depth_truncated);
+}
+
+#[test]
+fn unspecified_depth_matches_prior_default_behavior() {
+    let (conn, _db_dir, _repo_dir) = chain_repo();
+
+    let with_default = impact(&conn, "t", None, generous_budget(), None).unwrap();
+    let with_explicit_max = impact(&conn, "t", None, generous_budget(), Some(10)).unwrap();
+
+    assert_eq!(with_default[0].affected, with_explicit_max[0].affected);
+    assert_eq!(with_default[0].depth_limit, 10);
+    assert!(!with_default[0].depth_truncated);
+    assert!(!with_default[0].truncated);
 }

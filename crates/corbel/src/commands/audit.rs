@@ -149,6 +149,7 @@ pub fn run(path: &Path, since: Option<&str>) -> anyhow::Result<()> {
             &symbol.name,
             Some(&symbol.file),
             TokenBudget::new(usize::MAX),
+            None,
         )?;
         let affected = impact_results
             .into_iter()
